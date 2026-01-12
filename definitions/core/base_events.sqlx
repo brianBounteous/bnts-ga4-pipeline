@@ -189,7 +189,7 @@ with raw_data AS (
         -- Items array with optional custom item parameters
         ${helpers.EXTRACT_ITEMS_ARRAY()}
 
-    FROM ${ref('your_ga4_source_table')}
+    FROM `server-side-bounteous-ga4-2024.analytics_452829362.events_*` 
 
 )
 
