@@ -6,7 +6,6 @@ config {
   bigquery: {
     partitionBy: "event_date",
     clusterBy: ["event_name", "session_key"],
-    updatePartitionFilter: "event_date > DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)"
   }
 }
 
@@ -14,12 +13,11 @@ js {
   const helpers = require('includes/helper.js');
   const config = helpers.getConfig();
   
-  const sourceTable = config.USE_FRESH_DAILY ? ref("events_fresh_*") : ref("events_*");
-  
   let dateFilter;
+  let sourceTable;
   
   if (config.FORCE_BACKFILL) {
-    // Backfill mode: specific date range
+    // Backfill mode: load historical data
     const startDate = helpers.GET_BACKFILL_START_DATE();
     const endDate = helpers.GET_BACKFILL_END_DATE();
     
@@ -27,11 +25,21 @@ js {
     const endDateSQL = endDate.includes('FORMAT_DATE') ? `(${endDate})` : `'${endDate}'`;
     
     dateFilter = `_TABLE_SUFFIX BETWEEN ${startDateSQL} AND ${endDateSQL}`;
-    console.log(`[BASE_EVENTS] Backfill from ${startDate} to ${endDate}`);
+    sourceTable = ref("events_*");
+    
+    console.log(`[BASE_EVENTS] Running backfill from ${startDate} to ${endDate}`);
   } else {
-    // Incremental: load last 7 days (catches any gaps)
-    dateFilter = `_TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY))`;
-    console.log(`[BASE_EVENTS] Incremental load (last 7 days)`);
+    // Normal mode: just load yesterday
+    dateFilter = `_TABLE_SUFFIX = FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))`;
+    sourceTable = config.USE_FRESH_DAILY ? ref("events_fresh_daily_*") : ref("events_*");
+    
+    const tableType = config.USE_FRESH_DAILY ? 'fresh_daily' : 'events';
+    console.log(`[BASE_EVENTS] Loading yesterday from ${tableType} table`);
+  }
+  
+  console.log(`[BASE_EVENTS] Data stream type: ${config.DATA_STREAM_TYPE}`);
+  if (config.DATA_STREAM_TYPE === 'both') {
+    console.log(`[BASE_EVENTS] Consolidate web/app params: ${config.CONSOLIDATE_WEB_APP_PARAMS}`);
   }
 }
 
@@ -160,7 +168,6 @@ WITH raw_data AS (
         stream_id,
         platform,
         
-        -- Ecommerce as STRUCT
         STRUCT(
             ecommerce.total_item_quantity,
             ecommerce.purchase_revenue_in_usd,
@@ -262,15 +269,10 @@ WITH raw_data AS (
         ${helpers.EXTRACT_ITEMS_ARRAY()}
 
     FROM ${sourceTable}
-    
     WHERE 1=1
       AND ${dateFilter}
-      ${ when(incremental(), `
-      -- Only load data newer than what's already in the table
-      AND PARSE_DATE('%Y%m%d', _TABLE_SUFFIX) > (SELECT COALESCE(MAX(event_date), DATE('1900-01-01')) FROM ${self()})
-      `) }
-),
 
+),
 
 ${ when(config.DATA_STREAM_TYPE === 'both' && config.CONSOLIDATE_WEB_APP_PARAMS, `
 consolidated_params AS (
