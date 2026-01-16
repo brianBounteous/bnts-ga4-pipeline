@@ -10,14 +10,16 @@ config {
 }
 
 pre_operations {
-  CREATE TEMP TABLE IF NOT EXISTS date_checkpoint AS
-  SELECT 
-    COALESCE(
-      MAX(event_date), 
-      DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)
-    ) AS checkpoint_date
-  FROM `${dataform.projectConfig.vars.SOURCE_PROJECT}.${dataform.projectConfig.vars.DESTINATION_DATASET}.base_events`
-  WHERE TRUE
+  BEGIN
+    -- Try to get max date from existing table
+    CREATE TEMP TABLE date_checkpoint AS
+    SELECT MAX(event_date) AS checkpoint_date
+    FROM `${dataform.projectConfig.vars.SOURCE_PROJECT}.${dataform.projectConfig.vars.DESTINATION_DATASET}.base_events`;
+  EXCEPTION WHEN ERROR THEN
+    -- Table doesn't exist yet (first run), use default backfill start date
+    CREATE TEMP TABLE date_checkpoint AS
+    SELECT DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH) AS checkpoint_date;
+  END;
 }
 
 js {
@@ -28,9 +30,8 @@ js {
   let sourceTable;
   let useCheckpoint = false;
   
-  const isFirstRun = !dataform.projectConfig.vars?.initialLoadComplete && config.FORCE_BACKFILL !== false;
-  
-  if (isFirstRun || config.FORCE_BACKFILL) {
+  // Check if we should force backfill
+  if (config.FORCE_BACKFILL) {
     const startDate = helpers.GET_BACKFILL_START_DATE();
     const endDate = helpers.GET_BACKFILL_END_DATE();
     
@@ -41,8 +42,9 @@ js {
     sourceTable = ref("events_*");
     useCheckpoint = false;
     
-    console.log(`[BASE_EVENTS] Running backfill from ${startDate} to ${endDate}`);
+    console.log(`[BASE_EVENTS] Running forced backfill from ${startDate} to ${endDate}`);
   } else {
+    // Normal incremental mode - use checkpoint
     sourceTable = config.USE_FRESH_DAILY ? ref("events_fresh_daily_*") : ref("events_*");
     useCheckpoint = true;
     
@@ -55,6 +57,9 @@ js {
     console.log(`[BASE_EVENTS] Consolidate web/app params: ${config.CONSOLIDATE_WEB_APP_PARAMS}`);
   }
 }
+
+
+
 
 WITH raw_data AS (
 
@@ -282,17 +287,18 @@ WITH raw_data AS (
         -- Items array
         ${helpers.EXTRACT_ITEMS_ARRAY()}
 
-    FROM ${sourceTable}
+    FROM ${sourceTable} 
+
     WHERE 1=1
       ${when(useCheckpoint, `
-      -- Incremental load: only load data after the last checkpoint
+      -- Incremental: load all data after checkpoint
       AND PARSE_DATE('%Y%m%d', REGEXP_EXTRACT(_TABLE_SUFFIX, '[0-9]+')) > (SELECT checkpoint_date FROM date_checkpoint)
       `, `
-      -- Backfill mode: use date filter
+      -- Backfill mode: use explicit date range
       AND ${dateFilter}
       `)}
-
 ),
+
 
 ${ when(config.DATA_STREAM_TYPE === 'both' && config.CONSOLIDATE_WEB_APP_PARAMS, `
 consolidated_params AS (
