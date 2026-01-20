@@ -14,46 +14,45 @@ js {
   console.log(`[RECONCILIATION] Checking for late arrivals (${config.RECONCILIATION_LOOKBACK_DAYS} days) and missing dates (last 7 days)`);
 }
 
--- MERGE: Insert only events that don't already exist (by event_key)
+-- Step 1: Create a temp table with dates to process
+CREATE TEMP TABLE dates_to_process AS
+WITH expected_dates AS (
+  SELECT date_value
+  FROM UNNEST(GENERATE_DATE_ARRAY(
+    DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY),
+    DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+  )) AS date_value
+),
+
+loaded_dates AS (
+  SELECT DISTINCT event_date
+  FROM ${ref("base_events_log")}
+  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+),
+
+missing_dates AS (
+  SELECT ed.date_value AS missing_date
+  FROM expected_dates ed
+  LEFT JOIN loaded_dates ld ON ed.date_value = ld.event_date
+  WHERE ld.event_date IS NULL
+)
+
+-- Missing dates (gap filling)
+SELECT missing_date AS process_date, 'gap_fill' AS reason
+FROM missing_dates
+
+UNION ALL
+
+-- Standard reconciliation date (late arrivals)
+SELECT 
+  DATE_SUB(CURRENT_DATE(), INTERVAL ${config.RECONCILIATION_LOOKBACK_DAYS} DAY) AS process_date,
+  'late_arrival' AS reason;
+
+-- Step 2: Now do the MERGE using the temp table
 MERGE ${ref("base_events")} AS target
 USING (
-  -- Identify dates that need processing
-  WITH expected_dates AS (
-    SELECT date_value
-    FROM UNNEST(GENERATE_DATE_ARRAY(
-      DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY),
-      DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
-    )) AS date_value
-  ),
-
-  -- Check the log instead of base_events directly
-  loaded_dates AS (
-    SELECT DISTINCT event_date
-    FROM ${ref("base_events_log")}
-    WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-  ),
-
-  missing_dates AS (
-    SELECT ed.date_value AS missing_date
-    FROM expected_dates ed
-    LEFT JOIN loaded_dates ld ON ed.date_value = ld.event_date
-    WHERE ld.event_date IS NULL
-  ),
-
-  dates_to_process AS (
-    -- Missing dates (gap filling)
-    SELECT missing_date AS process_date, 'gap_fill' AS reason
-    FROM missing_dates
-    
-    UNION ALL
-    
-    -- Standard reconciliation date (late arrivals)
-    SELECT 
-      DATE_SUB(CURRENT_DATE(), INTERVAL ${config.RECONCILIATION_LOOKBACK_DAYS} DAY) AS process_date,
-      'late_arrival' AS reason
-  ),
-
-  finalized_data AS (
+  WITH finalized_data AS (
+   
     SELECT 
       PARSE_DATE('%Y%m%d', event_date) AS event_date,
       event_timestamp,
@@ -301,4 +300,5 @@ USING (
 ) AS source
 ON target.event_key = source.event_key
 WHEN NOT MATCHED THEN
-  INSERT ROW;
+  INSERT ROW; 
+
