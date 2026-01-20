@@ -1,0 +1,25 @@
+config {
+  type: "incremental",
+  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  description: "Audit log of base_events loads - tracks which dates have been processed",
+  tags: ["daily", "ga4", "audit"],
+  bigquery: {
+    partitionBy: "load_date",
+    clusterBy: ["event_date"]
+  }
+}
+
+SELECT
+  CURRENT_TIMESTAMP() AS load_timestamp,
+  CURRENT_DATE() AS load_date,
+  event_date,
+  COUNT(*) AS row_count,
+  MIN(event_timestamp) AS min_event_timestamp,
+  MAX(event_timestamp) AS max_event_timestamp
+FROM ${ref("base_events")}
+WHERE 1=1
+  ${ when(incremental(), `
+  -- Only log dates that aren't already in the log
+  AND event_date NOT IN (SELECT DISTINCT event_date FROM ${self()})
+  `) }
+GROUP BY event_date

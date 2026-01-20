@@ -4,7 +4,7 @@ config {
   description: "Reconciles late-arriving events AND fills any missing date gaps in base_events",
   tags: ["daily", "ga4", "reconciliation"],
   hasOutput: false,
-  dependencies: ["base_events"]
+  dependencies: ["base_events", "base_events_log"]
 }
 
 js {
@@ -17,7 +17,7 @@ js {
 -- MERGE: Insert only events that don't already exist (by event_key)
 MERGE ${ref("base_events")} AS target
 USING (
-  -- Find dates that should exist but don't (gap filling)
+  -- Identify dates that need processing
   WITH expected_dates AS (
     SELECT date_value
     FROM UNNEST(GENERATE_DATE_ARRAY(
@@ -26,20 +26,20 @@ USING (
     )) AS date_value
   ),
 
-  existing_dates AS (
+  -- Check the log instead of base_events directly
+  loaded_dates AS (
     SELECT DISTINCT event_date
-    FROM ${ref("base_events")}
+    FROM ${ref("base_events_log")}
     WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
   ),
 
   missing_dates AS (
     SELECT ed.date_value AS missing_date
     FROM expected_dates ed
-    LEFT JOIN existing_dates ex ON ed.date_value = ex.event_date
-    WHERE ex.event_date IS NULL
+    LEFT JOIN loaded_dates ld ON ed.date_value = ld.event_date
+    WHERE ld.event_date IS NULL
   ),
 
-  -- Get data for missing dates AND late-arriving events
   dates_to_process AS (
     -- Missing dates (gap filling)
     SELECT missing_date AS process_date, 'gap_fill' AS reason
@@ -54,9 +54,7 @@ USING (
   ),
 
   finalized_data AS (
-    
     SELECT 
-      
       PARSE_DATE('%Y%m%d', event_date) AS event_date,
       event_timestamp,
       event_name,
@@ -171,17 +169,23 @@ USING (
       platform,
       
       STRUCT(
-            ecommerce.total_item_quantity,
-            ecommerce.purchase_revenue_in_usd,
-            ecommerce.purchase_revenue,
-            ecommerce.refund_value_in_usd,
-            ecommerce.refund_value,
-            ecommerce.shipping_value_in_usd,
-            ecommerce.shipping_value,
-            ecommerce.tax_value_in_usd,
-            ecommerce.tax_value,
-            ecommerce.unique_items,
-            ecommerce.transaction_id
+          ecommerce.transaction_id,
+          ecommerce.value,
+          ecommerce.tax,
+          ecommerce.shipping,
+          ecommerce.currency,
+          ecommerce.coupon,
+          ecommerce.affiliation,
+          ecommerce.total_item_quantity,
+          ecommerce.purchase_revenue_in_usd,
+          ecommerce.purchase_revenue,
+          ecommerce.refund_value_in_usd,
+          ecommerce.refund_value,
+          ecommerce.shipping_value_in_usd,
+          ecommerce.shipping_value,
+          ecommerce.tax_value_in_usd,
+          ecommerce.tax_value,
+          ecommerce.unique_items
       ) AS ecommerce,
 
       STRUCT(
