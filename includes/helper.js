@@ -259,11 +259,14 @@ function GENERATE_EVENT_KEY_CONCAT() {
     "event_name"
   ];
   
+  // Add core params
   config.CORE_PARAMS_ARRAY.forEach(param => {
     fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
   });
   
+  // Handle web/app params based on consolidation
   if (effectiveType === 'both' && config.CONSOLIDATE_WEB_APP_PARAMS) {
+    // Use consolidated field names
     const consolidatedNames = new Set();
     
     config.WEB_PARAMS_ARRAY.forEach(param => {
@@ -276,18 +279,21 @@ function GENERATE_EVENT_KEY_CONCAT() {
       if (param.consolidated_name) {
         consolidatedNames.add(param.consolidated_name);
       } else {
+        // App-only params that don't consolidate
         fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
       }
     });
     
+    // Add consolidated fields (these are already strings from COALESCE)
     consolidatedNames.forEach(name => {
       fields.push(`COALESCE(${name}, '')`);
     });
     
   } else {
+    // Not consolidating - add web and app params separately
     if (effectiveType === 'web' || effectiveType === 'both') {
       config.WEB_PARAMS_ARRAY.forEach(param => {
-        fields.push(`COALESCE(${param.name}, '')`);
+        fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);  // FIX: Added CAST
       });
     }
     
@@ -298,6 +304,7 @@ function GENERATE_EVENT_KEY_CONCAT() {
     }
   }
   
+  // Add custom params (always included)
   config.CUSTOM_PARAMS_ARRAY.forEach(param => {
     fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
   });
