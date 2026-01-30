@@ -32,8 +32,8 @@ WITH page_attributes AS (
     ${ when(effectiveDataStreamType === 'app',
       `CAST(NULL AS STRING) AS page_hostname,`
     )}
-    ${ when(effectiveDataStreamType === 'both',
-      `REGEXP_EXTRACT(page.page_location, r'://([^/]+)') AS page_hostname,`
+   ${ when(effectiveDataStreamType === 'both',
+  `REGEXP_EXTRACT(${screenFields.location}, r'://([^/]+)') AS page_hostname,`
     )}
     event_date
   FROM ${ref("base_events")}

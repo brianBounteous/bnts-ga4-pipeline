@@ -35,9 +35,7 @@ js {
 WITH page_view_events AS (
   SELECT
     -- Keys
-    ${ when(effectiveDataStreamType === 'web', 'page_session_key') }
-    ${ when(effectiveDataStreamType === 'app', 'screen_session_key') }
-    ${ when(effectiveDataStreamType === 'both', 'COALESCE(page_session_key, screen_session_key)') } AS page_session_key,
+   CONCAT(${screenFields.key}, '_', session_key) AS page_session_key,
     
     ${screenFields.key} AS page_key,
     session_key,

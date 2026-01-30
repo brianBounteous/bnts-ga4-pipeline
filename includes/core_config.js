@@ -47,7 +47,7 @@ const PROPERTIES_CONFIG = null;
  * Default data stream type (used when PROPERTIES_CONFIG is null)
  * Options: 'web', 'app', or 'both'
  */
-const DATA_STREAM_TYPE = 'both';
+const DATA_STREAM_TYPE = 'web';
 
 /**
  * Parameter consolidation for combined web/app streams
