@@ -3,6 +3,16 @@ config {
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
   description: "Audit log tracking execution of all pipeline models",
   tags: ["daily", "ga4", "core", "audit"],
+  dependencies: [
+    "base_events",
+    "sessions",
+    "dim_pages",
+    "fct_page_views",
+    "transactions",
+    "ecommerce_items",
+    "user_identity_map",
+    "users"
+  ], 
   bigquery: {
     partitionBy: "load_date",
     clusterBy: ["model_name", "event_date"]
@@ -14,20 +24,14 @@ js {
   const config = helpers.getConfig();
   
   // Track which models are enabled and should be logged
-  const enabledModels = [
-    'base_events',
-    'sessions',
-    'dim_pages',
-    'fct_page_views',
-    "transactions",      
-    "ecommerce_items", 
-    "user_identity_map", 
-    "users"              
-  ];
+  const enabledModels = ['base_events', 'sessions', 'dim_pages', 'fct_page_views', "transactions", "ecommerce_items", "user_identity_map", "users"    ];
   
-  // Add ecommerce models if enabled
   if (config.HAS_ECOMMERCE) {
     enabledModels.push('transactions', 'ecommerce_items');
+  }
+  
+  if (config.HAS_USER_AGGREGATION) {
+    enabledModels.push('user_identity_map', 'users');
   }
   
   console.log(`[MODEL_EXECUTION_LOG] Tracking models: ${enabledModels.join(', ')}`);
