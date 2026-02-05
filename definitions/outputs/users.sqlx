@@ -17,44 +17,55 @@ js {
   const trafficFields = helpers.getTrafficSourceFields();
   const trafficFieldNames = Object.keys(trafficFields);
   
-  // Generate field selections for traffic source CTEs
-  const trafficFieldSelects = trafficFieldNames.map(f => `${f}`).join(',\n      ');
-  
   console.log(`[USERS] Building user-level aggregations with identity resolution`);
   console.log(`[USERS] Ecommerce enabled: ${config.HAS_ECOMMERCE}`);
   console.log(`[USERS] Traffic source fields: ${trafficFieldNames.join(', ')}`);
 }
 
--- Step 1: Resolve user identities
+-- Step 1: Resolve user identities (pseudo_id → resolved_user_id)
 WITH user_pseudo_resolution AS (
   SELECT 
     user_pseudo_id,
-    -- Best user_id: most events, then first seen (tie-breaker), then alphabetically
     COALESCE(
       ARRAY_AGG(
         user_id IGNORE NULLS
         ORDER BY event_count DESC, first_seen_timestamp ASC, user_id ASC
         LIMIT 1
       )[SAFE_OFFSET(0)],
-      user_pseudo_id  -- Use pseudo_id if never authenticated
+      user_pseudo_id
     ) AS resolved_user_id,
-    -- Track primary authenticated user_id
     ARRAY_AGG(
       user_id IGNORE NULLS
       ORDER BY event_count DESC, first_seen_timestamp ASC, user_id ASC
       LIMIT 1
     )[SAFE_OFFSET(0)] AS primary_user_id,
-    -- Collect all associated pseudo_ids
-    ARRAY_AGG(DISTINCT user_pseudo_id IGNORE NULLS) AS user_pseudo_ids,
     COUNT(DISTINCT user_id) - COUNTIF(user_id IS NULL) AS user_id_count
   FROM ${ref("user_identity_map")}
   GROUP BY user_pseudo_id
 ),
 
--- Step 2: Get resolved user ID for all events
+-- Step 2: Universal identifier lookup (maps any known identifier to resolved_user_id)
+identifier_lookup AS (
+  SELECT DISTINCT 
+    user_pseudo_id AS identifier, 
+    resolved_user_id
+  FROM user_pseudo_resolution
+
+  UNION DISTINCT
+
+  SELECT DISTINCT 
+    uim.user_id AS identifier, 
+    upr.resolved_user_id
+  FROM ${ref("user_identity_map")} uim
+  INNER JOIN user_pseudo_resolution upr 
+    ON uim.user_pseudo_id = upr.user_pseudo_id
+  WHERE uim.user_id IS NOT NULL
+),
+
+-- Step 3: Resolve all events to resolved_user_id
 events_resolved AS (
   SELECT
-    upr.resolved_user_id,
+    il.resolved_user_id,
     upr.primary_user_id,
     e.user_pseudo_id,
     e.event_date,
@@ -63,11 +74,13 @@ events_resolved AS (
     e.event_name,
     e.engagement_time_msec
   FROM ${ref("base_events")} e
-  INNER JOIN user_pseudo_resolution upr 
-    ON COALESCE(e.user_pseudo_id, e.user_id) = upr.user_pseudo_id
+  INNER JOIN identifier_lookup il
+    ON COALESCE(e.user_pseudo_id, e.user_id) = il.identifier
+  INNER JOIN user_pseudo_resolution upr
+    ON il.resolved_user_id = upr.resolved_user_id
 ),
 
--- Step 3: User-level aggregations
+-- Step 4: User-level aggregations
 user_metrics AS (
   SELECT
     resolved_user_id,
@@ -94,18 +107,18 @@ user_metrics AS (
   GROUP BY resolved_user_id, primary_user_id
 ),
 
--- Step 4: First traffic source (from first session)
+-- Step 5: First traffic source (from first session)
 first_traffic_raw AS (
   SELECT
-    upr.resolved_user_id,
+    il.resolved_user_id,
     ${trafficFieldNames.map(f => `s.${f}`).join(',\n    ')},
     ROW_NUMBER() OVER (
-      PARTITION BY upr.resolved_user_id 
+      PARTITION BY il.resolved_user_id 
       ORDER BY s.session_start_timestamp ASC
     ) AS rn
   FROM ${ref("sessions")} s
-  INNER JOIN user_pseudo_resolution upr 
-    ON s.user_id = upr.user_pseudo_id
+  INNER JOIN identifier_lookup il
+    ON s.user_id = il.identifier
 ),
 
 first_traffic AS (
@@ -116,18 +129,18 @@ first_traffic AS (
   WHERE rn = 1
 ),
 
--- Step 5: Last non-direct traffic source
+-- Step 6: Last non-direct traffic source
 last_non_direct_raw AS (
   SELECT
-    upr.resolved_user_id,
+    il.resolved_user_id,
     ${trafficFieldNames.map(f => `s.${f}`).join(',\n    ')},
     ROW_NUMBER() OVER (
-      PARTITION BY upr.resolved_user_id 
+      PARTITION BY il.resolved_user_id 
       ORDER BY s.session_start_timestamp DESC
     ) AS rn
   FROM ${ref("sessions")} s
-  INNER JOIN user_pseudo_resolution upr 
-    ON s.user_id = upr.user_pseudo_id
+  INNER JOIN identifier_lookup il
+    ON s.user_id = il.identifier
   WHERE s.session_source NOT IN ('(direct)', '(not set)', '')
     AND s.session_medium NOT IN ('(none)', '(not set)', '')
 ),
@@ -140,7 +153,7 @@ last_non_direct AS (
   WHERE rn = 1
 ),
 
--- Step 6: Behavioral dimensions (distributions)
+-- Step 7: Behavioral dimensions (distributions)
 user_dimensions AS (
   SELECT
     resolved_user_id,
@@ -166,17 +179,17 @@ user_dimensions AS (
     ) AS metro_distribution
   FROM (
     SELECT
-      upr.resolved_user_id,
+      il.resolved_user_id,
       s.device_category,
       s.platform,
       s.country,
       s.metro,
       COUNT(*) AS session_count
     FROM ${ref("sessions")} s
-    INNER JOIN user_pseudo_resolution upr 
-      ON s.user_id = upr.user_pseudo_id
+    INNER JOIN identifier_lookup il
+      ON s.user_id = il.identifier
     GROUP BY
-      upr.resolved_user_id,
+      il.resolved_user_id,
       s.device_category,
       s.platform,
       s.country,
@@ -187,10 +200,10 @@ user_dimensions AS (
 
 ${ when(config.HAS_ECOMMERCE, `,
 
--- Step 7: Ecommerce metrics
+-- Step 8: Ecommerce metrics
 ecommerce_metrics AS (
   SELECT
-    upr.resolved_user_id,
+    il.resolved_user_id,
     SUM(t.net_revenue_in_usd) AS lifetime_revenue_usd,
     SUM(t.net_revenue) AS lifetime_revenue,
     COUNT(DISTINCT t.transaction_id) AS total_transactions,
@@ -198,9 +211,9 @@ ecommerce_metrics AS (
     MAX(CASE WHEN t.event_name = 'purchase' THEN t.event_date END) AS last_purchase_date,
     AVG(CASE WHEN t.event_name = 'purchase' THEN t.net_revenue_in_usd END) AS average_order_value_usd
   FROM ${ref("transactions")} t
-  INNER JOIN user_pseudo_resolution upr 
-    ON COALESCE(t.user_id, t.user_pseudo_id) = upr.user_pseudo_id
-  GROUP BY upr.resolved_user_id
+  INNER JOIN identifier_lookup il
+    ON t.user_id = il.identifier
+  GROUP BY il.resolved_user_id
 )
 `)}
 
