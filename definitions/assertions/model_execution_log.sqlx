@@ -103,8 +103,8 @@ SELECT
   COUNT(DISTINCT session_key) AS unique_sessions,
   COUNT(DISTINCT user_id) AS unique_users
 FROM ${ref("fct_page_views")}
-WHERE session_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-  AND session_date < CURRENT_DATE()
+WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+  AND event_date < CURRENT_DATE()
 GROUP BY session_date
 
 ${ when(config.HAS_ECOMMERCE, `
