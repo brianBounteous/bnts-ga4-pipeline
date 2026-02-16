@@ -123,7 +123,10 @@ function GENERATE_EVENT_KEY_CONCAT() {
     "COALESCE(user_id, '')",
     "COALESCE(CAST(ga_session_id AS STRING), '')",
     "CAST(event_timestamp AS STRING)",
-    "event_name"
+    "event_name",
+    "COALESCE(CAST(event_server_timestamp_offset AS STRING), '')",
+    "COALESCE(CAST(batch_event_index AS STRING), '')",
+    "COALESCE(CAST(event_bundle_sequence_id AS STRING), '')"
   ];
   
   config.CORE_PARAMS_ARRAY.forEach(param => {
