@@ -98,6 +98,12 @@ REGEXP_REPLACE(
 - **Client fork pattern:** bitbucket.org/hs2studio/ga4-pipeline-{client-name}
 - **Never push to or reference GitHub remotes.**
 
+### Branching
+
+- Always commit to feature branches (`feature/{description}`)
+- Push feature branches to Bitbucket
+- Do NOT merge to main — leave that to the developer
+
 ### One-Time Clone Setup (required for .gitattributes merge protection)
 
 After cloning any client fork, run this once to enable the `merge=ours` driver used by `.gitattributes`:
