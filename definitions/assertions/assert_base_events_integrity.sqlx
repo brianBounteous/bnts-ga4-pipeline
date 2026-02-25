@@ -22,7 +22,6 @@ WITH date_coverage AS (
 null_rates AS (
   SELECT
     COUNT(*) AS total_rows,
-    COUNTIF(session_key IS NULL OR session_key = '') AS null_session_keys,
     COUNTIF(event_name IS NULL OR event_name = '') AS null_event_names,
     COUNTIF(event_timestamp IS NULL) AS null_timestamps,
     COUNTIF(user_id IS NULL OR user_id = '') AS null_user_ids,
@@ -59,8 +58,7 @@ UNION ALL
 
 -- Check 2: Critical fields null at >5% rate
 SELECT 'HIGH_NULL_RATE' AS check_name,
-  FORMAT('Null rates — session_key: %d/%d (%.1f%%), event_name: %d/%d (%.1f%%), event_key: %d/%d (%.1f%%)',
-    null_session_keys, total_rows, 100.0 * null_session_keys / NULLIF(total_rows, 0),
+  FORMAT('Null rates — event_name: %d/%d (%.1f%%), event_key: %d/%d (%.1f%%)',
     null_event_names, total_rows, 100.0 * null_event_names / NULLIF(total_rows, 0),
     null_event_keys, total_rows, 100.0 * null_event_keys / NULLIF(total_rows, 0)
   ) AS detail
@@ -87,3 +85,22 @@ FROM duplicate_keys dk
 CROSS JOIN null_rates nr
 WHERE nr.total_rows > 0
   AND SAFE_DIVIDE(dk.total_duplicate_events, nr.total_rows) > 0.01
+
+UNION ALL
+
+-- Check 4: Missing session identifier components
+-- session_key is always non-null (CONCAT(COALESCE(...)) guarantees worst case '--').
+-- Check the underlying fields: ga_session_id and user_id (already COALESCE(user_id, user_pseudo_id)).
+-- If user_id is null here, both user_id and user_pseudo_id from the source were missing.
+SELECT 'MISSING_SESSION_COMPONENTS' AS check_name,
+  FORMAT('%d events are missing ga_session_id or user_id (both user_id and user_pseudo_id are null)',
+    COUNT(*)
+  ) AS detail
+FROM ${ref("base_events")}
+WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+  AND event_date < CURRENT_DATE()
+  AND (
+    ga_session_id IS NULL
+    OR user_id IS NULL
+  )
+HAVING COUNT(*) > 0
