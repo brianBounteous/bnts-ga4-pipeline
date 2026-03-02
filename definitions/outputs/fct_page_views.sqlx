@@ -54,10 +54,11 @@ WITH page_view_events AS (
     -- Engagement metrics
     engagement_time_msec,
     percent_scrolled,
-    
+
     -- Event metadata
-    event_name
-    
+    event_name,
+    screen_type
+
   FROM ${ref("base_events")}
   WHERE 1=1
     AND ${screenFields.key} IS NOT NULL
@@ -134,10 +135,13 @@ page_session_aggregated AS (
     MAX(COALESCE(pv.percent_scrolled, 0)) AS max_scroll_depth,
     COUNT(*) AS page_view_event_count,
     
+    -- Stream type
+    ANY_VALUE(pv.screen_type) AS screen_type,
+
     -- Entry/exit flags
     MAX(CASE WHEN pv.event_timestamp = sb.first_event_timestamp THEN TRUE ELSE FALSE END) AS is_entry_page,
     MAX(CASE WHEN pv.event_timestamp = sb.last_event_timestamp THEN TRUE ELSE FALSE END) AS is_exit_page
-    
+
   FROM page_view_with_next_event pv
   LEFT JOIN session_boundaries sb ON pv.session_key = sb.session_key
   GROUP BY 
@@ -176,6 +180,9 @@ SELECT
   max_scroll_depth,
   page_view_event_count,
   
+  -- Stream type
+  screen_type,
+
   -- Flags
   is_entry_page,
   is_exit_page
