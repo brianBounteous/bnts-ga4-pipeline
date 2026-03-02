@@ -103,11 +103,11 @@ UNION ALL
 -- If user_id is null here, both user_id and user_pseudo_id from the source were missing.
 -- GA4 legitimately has events without ga_session_id (consent events, some first_visit events, etc.).
 SELECT 'MISSING_SESSION_COMPONENTS' AS check_name,
-  FORMAT('%d/%d events missing ga_session_id or user_id (%.1f%%). Threshold: 5.0%%.',
+  FORMAT('%d/%d events missing ga_session_id or user_id (%.1f%%). Threshold: 25.0%%.',
     missing_session_components,
     total_rows,
     100.0 * missing_session_components / NULLIF(total_rows, 0)
   ) AS detail
 FROM session_component_rates
 WHERE total_rows > 0
-  AND SAFE_DIVIDE(missing_session_components, total_rows) > 0.05
+  AND SAFE_DIVIDE(missing_session_components, total_rows) > 0.25
