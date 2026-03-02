@@ -12,7 +12,7 @@ config {
     "ecommerce_items",
     "user_identity_map",
     "users"
-  ], 
+  ],
   bigquery: {
     partitionBy: "load_date",
     clusterBy: ["model_name", "event_date"]
@@ -22,26 +22,48 @@ config {
 js {
   const helpers = require('includes/helper.js');
   const config = helpers.getConfig();
-  
+
   const enabledModels = [
     'base_events', 'sessions', 'dim_pages', 'fct_page_views',
     'user_identity_map', 'users'
   ];
-  
+
   if (config.HAS_ECOMMERCE) {
     enabledModels.push('transactions', 'ecommerce_items');
   }
-  
+
+  // Compute date range SQL expressions to match the processing window used by base_events.
+  // Incremental: 3-day rolling refresh window
+  // Initial load (non-incremental, no backfill): INITIAL_LOAD_DAYS back to yesterday
+  // Backfill (non-incremental, FORCE_FULL_BACKFILL=true): BACKFILL_START_DATE to BACKFILL_END_DATE
+  let dateStartSQL, dateEndSQL;
+
+  if (incremental()) {
+    dateStartSQL = 'DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)';
+    dateEndSQL = 'DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)';
+  } else if (config.FORCE_FULL_BACKFILL) {
+    dateStartSQL = config.BACKFILL_START_DATE
+      ? `PARSE_DATE('%Y%m%d', '${config.BACKFILL_START_DATE}')`
+      : `DATE_SUB(CURRENT_DATE(), INTERVAL 13 MONTH)`;
+    dateEndSQL = config.BACKFILL_END_DATE
+      ? `PARSE_DATE('%Y%m%d', '${config.BACKFILL_END_DATE}')`
+      : `DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)`;
+  } else {
+    // Initial load
+    dateStartSQL = `DATE_SUB(CURRENT_DATE(), INTERVAL ${config.INITIAL_LOAD_DAYS} DAY)`;
+    dateEndSQL = 'DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)';
+  }
+
   console.log(`[MODEL_EXECUTION_LOG] Tracking models: ${enabledModels.join(', ')}`);
 }
 
--- Date spine: one row per date in the rolling refresh window
+-- Date spine: one row per date in the processing window
 WITH date_spine AS (
   SELECT event_date
   FROM UNNEST(
     GENERATE_DATE_ARRAY(
-      DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY),
-      DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+      ${dateStartSQL},
+      ${dateEndSQL}
     )
   ) AS event_date
 ),
@@ -59,8 +81,8 @@ base_events_stats AS (
     COUNT(DISTINCT session_key) AS sessions,
     COUNT(DISTINCT user_id) AS users
   FROM ${ref("base_events")}
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND event_date < CURRENT_DATE()
+  WHERE event_date >= ${dateStartSQL}
+    AND event_date <= ${dateEndSQL}
   GROUP BY event_date
 ),
 
@@ -73,8 +95,8 @@ sessions_stats AS (
     COUNT(DISTINCT session_key) AS sessions,
     COUNT(DISTINCT user_id) AS users
   FROM ${ref("sessions")}
-  WHERE session_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND session_date < CURRENT_DATE()
+  WHERE session_date >= ${dateStartSQL}
+    AND session_date <= ${dateEndSQL}
   GROUP BY session_date
 ),
 
@@ -87,8 +109,8 @@ dim_pages_stats AS (
     CAST(NULL AS INT64) AS sessions,
     CAST(NULL AS INT64) AS users
   FROM ${ref("dim_pages")}
-  WHERE last_seen_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND last_seen_date < CURRENT_DATE()
+  WHERE last_seen_date >= ${dateStartSQL}
+    AND last_seen_date <= ${dateEndSQL}
   GROUP BY last_seen_date
 ),
 
@@ -101,8 +123,8 @@ fct_page_views_stats AS (
     COUNT(DISTINCT session_key) AS sessions,
     COUNT(DISTINCT user_id) AS users
   FROM ${ref("fct_page_views")}
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND event_date < CURRENT_DATE()
+  WHERE event_date >= ${dateStartSQL}
+    AND event_date <= ${dateEndSQL}
   GROUP BY event_date
 ),
 
@@ -115,8 +137,8 @@ user_identity_map_stats AS (
     CAST(NULL AS INT64) AS sessions,
     COUNT(DISTINCT user_pseudo_id) AS users
   FROM ${ref("user_identity_map")}
-  WHERE last_seen_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND last_seen_date < CURRENT_DATE()
+  WHERE last_seen_date >= ${dateStartSQL}
+    AND last_seen_date <= ${dateEndSQL}
   GROUP BY last_seen_date
 ),
 
@@ -129,8 +151,8 @@ users_stats AS (
     CAST(NULL AS INT64) AS sessions,
     COUNT(*) AS users
   FROM ${ref("users")}
-  WHERE last_seen_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND last_seen_date < CURRENT_DATE()
+  WHERE last_seen_date >= ${dateStartSQL}
+    AND last_seen_date <= ${dateEndSQL}
   GROUP BY last_seen_date
 )
 
@@ -145,8 +167,8 @@ transactions_stats AS (
     COUNT(DISTINCT session_key) AS sessions,
     COUNT(DISTINCT user_id) AS users
   FROM ${ref("transactions")}
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND event_date < CURRENT_DATE()
+  WHERE event_date >= ${dateStartSQL}
+    AND event_date <= ${dateEndSQL}
   GROUP BY event_date
 ),
 
@@ -159,8 +181,8 @@ ecommerce_items_stats AS (
     COUNT(DISTINCT session_key) AS sessions,
     COUNT(DISTINCT user_id) AS users
   FROM ${ref("ecommerce_items")}
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
-    AND event_date < CURRENT_DATE()
+  WHERE event_date >= ${dateStartSQL}
+    AND event_date <= ${dateEndSQL}
   GROUP BY event_date
 )
 `)}
