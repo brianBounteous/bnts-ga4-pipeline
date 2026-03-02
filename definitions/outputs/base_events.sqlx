@@ -370,7 +370,14 @@ processed_events AS (
 
         stream_id,
         platform,
-        
+
+        -- Stream type classification derived from platform
+        CASE
+            WHEN platform = 'WEB' THEN 'web'
+            WHEN platform IN ('IOS', 'ANDROID') THEN 'app'
+            ELSE 'unknown'
+        END AS screen_type,
+
         STRUCT(
             ecommerce.total_item_quantity,
             ecommerce.purchase_revenue_in_usd,
@@ -525,7 +532,7 @@ keys_added AS (
           firebase_screen_class,
           firebase_screen_id,
           firebase_previous_screen,
-          TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class, ''))))) AS screen_key
+          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)])))) AS screen_key
         ) AS app,
 
         -- Screen-session compound key for unique screen view calculations
@@ -533,7 +540,7 @@ keys_added AS (
           COALESCE(stream_id, ''), '-',
           COALESCE(CAST(ga_session_id AS STRING), ''), '-',
           COALESCE(user_id, ''), '-',
-          TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class, '')))))
+          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)]))))
         ) AS screen_session_key`
         )}
         ${ when(
@@ -572,7 +579,7 @@ keys_added AS (
           firebase_screen_class,
           firebase_screen_id,
           firebase_previous_screen,
-          TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class, ''))))) AS screen_key
+          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)])))) AS screen_key
         ) AS app,
 
         -- Both page-session and screen-session compound keys
@@ -587,7 +594,7 @@ keys_added AS (
           COALESCE(stream_id, ''), '-',
           COALESCE(CAST(ga_session_id AS STRING), ''), '-',
           COALESCE(user_id, ''), '-',
-          TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class, '')))))
+          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)]))))
         ) AS screen_session_key`
         )}
         

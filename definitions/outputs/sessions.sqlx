@@ -37,7 +37,8 @@ WITH session_events AS (
     ga_session_number,
     stream_id,
     platform,
-    
+    screen_type,
+
     -- Date & timestamps
     event_date,
     event_timestamp,
@@ -126,9 +127,12 @@ session_aggregated AS (
     COUNT(DISTINCT screen_key) AS unique_screens_viewed,
     COUNTIF(event_name = 'page_view') AS page_view_count,
     
+    -- Stream type (from first event in session)
+    ARRAY_AGG(screen_type ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS screen_type,
+
     -- Flags
     MAX(CASE WHEN session_engaged = '1' THEN TRUE ELSE FALSE END) AS is_engaged_session
-    
+
   FROM session_events
   GROUP BY session_key, user_id, user_pseudo_id
 )
@@ -141,7 +145,8 @@ SELECT
   ga_session_number,
   stream_id,
   platform,
-  
+  screen_type,
+
   -- Date
   session_date,
   session_start_timestamp,
