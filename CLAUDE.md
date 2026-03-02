@@ -170,3 +170,16 @@ REGEXP_REPLACE(
 ## Retro Process
 
 After each deployment or significant feature completion, review and update this CLAUDE.md to capture new patterns, lessons learned, and refined guidelines.
+
+## Assertion & Data Quality Rules
+
+- All data quality assertions must use percentage-based thresholds, not zero-tolerance checks, unless explicitly instructed otherwise
+- Follow the existing threshold patterns in the assertion files (currently 5% for null rates, 1% for duplicate rates)
+- Do not change assertion thresholds or add new assertions without explicit instructions specifying the threshold
+- When creating new assertions, match the FORMAT string style used by existing checks in the same file
+
+## General Guardrails
+
+- Do not make behavioral or architectural decisions beyond what is explicitly described in the prompt
+- If a prompt is ambiguous about a design choice (e.g., threshold values, naming conventions, grain definitions), ask for clarification rather than assuming
+- When modifying existing patterns, follow the conventions already established in the file unless the prompt explicitly says otherwise
