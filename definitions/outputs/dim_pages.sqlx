@@ -5,7 +5,7 @@ config {
   tags: ["daily", "ga4", "pages", "dimensions", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
-    clusterBy: ["page_key"]
+    clusterBy: ["page_key", "screen_type"]
   }
 }
 
@@ -35,6 +35,7 @@ WITH page_attributes AS (
    ${ when(effectiveDataStreamType === 'both',
   `REGEXP_EXTRACT(${screenFields.location}, r'://([^/]+)') AS page_hostname,`
     )}
+    screen_type,
     event_date
   FROM ${ref("base_events")}
   WHERE ${screenFields.key} IS NOT NULL
@@ -50,6 +51,7 @@ page_summary AS (
     APPROX_TOP_COUNT(page_path, 1)[OFFSET(0)].value AS page_path,
     APPROX_TOP_COUNT(page_title, 1)[OFFSET(0)].value AS page_title,
     APPROX_TOP_COUNT(page_hostname, 1)[OFFSET(0)].value AS page_hostname,
+    APPROX_TOP_COUNT(screen_type, 1)[OFFSET(0)].value AS screen_type,
     MIN(event_date) AS first_seen_date,
     MAX(event_date) AS last_seen_date,
     CURRENT_TIMESTAMP() AS last_updated_timestamp
@@ -63,6 +65,7 @@ SELECT
   page_path,
   page_title,
   page_hostname,
+  screen_type,
   first_seen_date,
   last_seen_date,
   last_updated_timestamp

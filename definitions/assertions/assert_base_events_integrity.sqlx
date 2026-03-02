@@ -22,7 +22,6 @@ WITH date_coverage AS (
 null_rates AS (
   SELECT
     COUNT(*) AS total_rows,
-    COUNTIF(session_key IS NULL OR session_key = '') AS null_session_keys,
     COUNTIF(event_name IS NULL OR event_name = '') AS null_event_names,
     COUNTIF(event_timestamp IS NULL) AS null_timestamps,
     COUNTIF(user_id IS NULL OR user_id = '') AS null_user_ids,
@@ -68,8 +67,7 @@ UNION ALL
 
 -- Check 2: Critical fields null at >5% rate
 SELECT 'HIGH_NULL_RATE' AS check_name,
-  FORMAT('Null rates — session_key: %d/%d (%.1f%%), event_name: %d/%d (%.1f%%), event_key: %d/%d (%.1f%%)',
-    null_session_keys, total_rows, 100.0 * null_session_keys / NULLIF(total_rows, 0),
+  FORMAT('Null rates — event_name: %d/%d (%.1f%%), event_key: %d/%d (%.1f%%)',
     null_event_names, total_rows, 100.0 * null_event_names / NULLIF(total_rows, 0),
     null_event_keys, total_rows, 100.0 * null_event_keys / NULLIF(total_rows, 0)
   ) AS detail

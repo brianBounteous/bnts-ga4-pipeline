@@ -1,14 +1,26 @@
-# GA4 Dataform Pipeline — Bounteous
+# GA4 Pipeline Framework
 
-A Dataform pipeline for processing GA4 event data in BigQuery. Designed as an agency framework: a single upstream repository that gets forked per client, with clear boundaries between framework code and client configuration.
+Dataform-based GA4 analytics pipeline designed for agency deployment across multiple clients. Bounteous maintains the upstream framework; each client gets a fork with customized configuration. The framework ingests raw GA4 BigQuery export data, cleans and normalizes event-level data, and produces staging tables for downstream consumption.
 
-## Architecture
+---
 
-### Data Flow
+## Architecture Overview
+
+### Upstream / Fork Model
+
+Bounteous maintains this framework repo. Each client deployment is a Bitbucket fork of this repo (`ga4-pipeline-{client-name}`). Framework changes merge downstream; client-owned configuration files are protected from being overwritten.
+
+| Remote | Points to |
+|--------|-----------|
+| `origin` | Client fork (`bitbucket.org/hs2studio/ga4-pipeline-{client-name}`) |
+| `upstream` | Framework repo (`bitbucket.org/hs2studio/ga4-pipeline-framework`) |
+
+### Pipeline Flow
+
 ```
 GA4 Export (events_*, events_fresh_*)
            ↓
-    [base_events] ─── Event-level data with 3-day rolling refresh
+    [base_events] ─── Event-level data, 3-day rolling refresh
            ↓
     ┌──────────┬──────────────────┬─────────────────────┐
     ↓          ↓                  ↓                     ↓
@@ -19,35 +31,195 @@ GA4 Export (events_*, events_fresh_*)
     [model_execution_log] ─── Audit log (runs last)
 ```
 
-### Design Principles
+### Key Design Decisions
 
-- **Consolidated over fragmented** — wide tables over many narrow joins
-- **Config-driven** — parameter extraction, stream types, and traffic source logic all controlled through configuration files
-- **Fork-friendly** — clear separation between framework code (upstream) and client customization (fork-owned)
-- **3-day rolling refresh** — captures late-arriving GA4 events without complex MERGE reconciliation
+- **Consolidated over fragmented** — wide tables instead of many narrow joins
+- **Type 1 SCD for dimensions** — current-state only, no history tracking
+- **Page-session grain for facts** — `fct_page_views` is keyed on page × session
+- **3-day rolling refresh** — `base_events` deletes and reloads the last 3 days on each run, capturing late-arriving GA4 events without complex MERGE reconciliation
+- **Config-driven** — parameter extraction, stream types, and traffic source logic are controlled through two files (`workflow_settings.yaml` and `client_config.js`) rather than code changes
 
-### Processing Strategy
+---
 
-Daily runs delete and reload the last 3 days of `base_events`, then rebuild downstream tables. When `USE_FRESH_DAILY = true`, days 1–2 come from `events_fresh_*` and day 3 from finalized `events_*`.
+## Quick Start: New Client Deployment
 
-## Quick Start
+### 1. Fork the Framework Repo
 
-1. Update `workflow_settings.yaml` with your project, source dataset, and destination dataset
-2. Update `definitions/declaration.js` with your source project/dataset
-3. Configure `includes/client_config.js` — set `DATA_STREAM_TYPE`, add custom parameters, configure ecommerce events
-4. If using custom attribution, set `USE_CUSTOM_TRAFFIC_SOURCE_LOGIC = true` and edit `includes/traffic_source.js`
-5. Create a release pointing to `main`, run manually to verify
-6. Schedule daily runs after GA4 data finalizes (~12pm+ PT)
+Fork `bitbucket.org/hs2studio/ga4-pipeline-framework` in Bitbucket as `ga4-pipeline-{client-name}`.
+
+Clone the fork locally:
+
+```bash
+git clone git@bitbucket.org:hs2studio/ga4-pipeline-{client-name}.git
+cd ga4-pipeline-{client-name}
+git remote add upstream git@bitbucket.org:hs2studio/ga4-pipeline-framework.git
+```
+
+### 2. Enable Merge Protection (one-time)
+
+```bash
+git config merge.ours.driver true
+```
+
+This activates the `.gitattributes` merge driver that preserves client-owned files when pulling upstream updates.
+
+### 3. Configure `workflow_settings.yaml`
+
+```yaml
+vars:
+  SOURCE_PROJECT: "your-gcp-project"
+  SOURCE_DATASET: "analytics_123456789"
+  DESTINATION_DATASET: "ga4_reporting"
+  HAS_ECOMMERCE: "false"          # "true" to enable ecommerce models
+  ENVIRONMENT: "production"       # "development" for dev runs
+```
+
+### 4. Configure `includes/client_config.js`
+
+Set the data stream type and parameter arrays. Key fields:
+
+- `DATA_STREAM_TYPE` — `'web'`, `'app'`, or `'both'`
+- `PROPERTIES_CONFIG` — `null` for single-property; define array for multi-property
+- `CORE_PARAMS_ARRAY`, `WEB_PARAMS_ARRAY`, `APP_PARAMS_ARRAY`, `CUSTOM_PARAMS_ARRAY` — GA4 event parameters to extract
+- `TRANSACTION_EVENTS`, `ECOMMERCE_ITEM_EVENTS` — ecommerce event names (if `HAS_ECOMMERCE: "true"`)
+
+### 5. SSH Authentication for Dataform
+
+Dataform must authenticate to Bitbucket to pull source code. **RSA keys in PEM format only** — see SSH Setup section below.
+
+1. Generate key and store in Secret Manager (grant Dataform service agent `secretmanager.secretAccessor`)
+2. Add public key to Bitbucket repository access keys
+
+### 6. Create Release and Workflow Configurations in Dataform
+
+**Both are required for scheduled execution** — a release config alone is not enough.
+
+- **Release config:** points to `main`, no compilation variable overrides for standard runs
+- **Workflow config:** references the release config, sets the execution schedule (run after GA4 data finalizes, typically 12pm+ PT)
+
+### 7. Initial Execution
+
+The first run must be **non-incremental** (the pre-ops script safely handles missing tables). After tables are created, daily incremental runs handle the 3-day rolling refresh automatically.
+
+---
+
+## Configuration Reference
+
+### `workflow_settings.yaml` — Compilation Variables
+
+Controls what gets compiled into the Dataform execution graph. Variables here act as feature flags — changing them changes which models are included in the compiled output.
+
+| Variable | Values | Description |
+|----------|--------|-------------|
+| `SOURCE_PROJECT` | GCP project ID | Source GA4 export project |
+| `SOURCE_DATASET` | dataset name | GA4 export dataset |
+| `DESTINATION_DATASET` | dataset name | Output staging dataset |
+| `HAS_ECOMMERCE` | `"true"` / `"false"` | Enables ecommerce models |
+| `ENVIRONMENT` | `"production"` / `"development"` | Controls dev vs prod behavior |
+
+**Client fork owned.** Do not modify in the framework repo.
+
+### `includes/client_config.js` — Data Processing Configuration
+
+Controls how compiled models process data. Does not affect what gets compiled — it affects runtime behavior within compiled models.
+
+| Setting | Description |
+|---------|-------------|
+| `DATA_STREAM_TYPE` | Web, app, or both |
+| `PROPERTIES_CONFIG` | Multi-property configuration (null = single property) |
+| `USE_FRESH_DAILY` | Use `events_fresh_*` for days 1–2 of the rolling window |
+| `CONSOLIDATE_WEB_APP_PARAMS` | Merge `page_location`/`firebase_screen` into unified fields when stream type is `'both'` |
+| `CORE_PARAMS_ARRAY` | GA4 event parameters to extract for all streams |
+| `WEB_PARAMS_ARRAY` | Web-only parameters |
+| `APP_PARAMS_ARRAY` | App-only parameters |
+| `CUSTOM_PARAMS_ARRAY` | Client-specific parameters |
+| `CUSTOM_ITEMS_PARAMS` | Custom item-level parameters from the items array |
+| `TRANSACTION_EVENTS` | Events that populate the transactions table |
+| `ECOMMERCE_ITEM_EVENTS` | Events that populate the ecommerce_items table |
+
+**The distinction:** `workflow_settings.yaml` toggles what gets compiled; `client_config.js` controls how compiled models behave at runtime.
+
+**Client fork owned.** Do not modify in the framework repo.
+
+---
+
+## Protected Files
+
+These files are owned by the client fork and are preserved automatically during upstream merges via `.gitattributes`:
+
+| File | Description |
+|------|-------------|
+| `workflow_settings.yaml` | Project/dataset settings and feature flags |
+| `includes/client_config.js` | Data processing configuration |
+| `includes/traffic_source.js` | Custom attribution logic |
+| `definitions/declaration.js` | Source table declarations |
+| `definitions/custom/**` | All client-specific models |
+
+### Pulling Upstream Updates
+
+```bash
+git fetch upstream
+git merge upstream/main --no-commit   # Review before finalizing
+git commit -m "Pull upstream framework updates"
+git push origin main
+```
+
+Client-owned files are preserved automatically. Framework files update cleanly. The `--no-commit` flag lets you review the merge result before finalizing.
+
+---
+
+## SSH Setup for Dataform
+
+### Key Format Requirements
+
+- **Must use RSA keys in PEM format.** Ed25519 and other formats are not compatible with Dataform.
+- Generate with: `ssh-keygen -t rsa -b 4096 -m PEM -f dataform_deploy_key`
+
+### Secret Manager Setup
+
+1. Store the private key contents in a Secret Manager secret
+2. Grant the Dataform service agent (`service-{PROJECT_NUMBER}@gcp-sa-dataform.iam.gserviceaccount.com`) the `Secret Manager Secret Accessor` role on that secret
+3. Reference the secret in the Dataform repository settings
+
+### Bitbucket Host Key
+
+Bitbucket rotated its SSH host key in 2023. If authentication fails with a host key verification error, the old key may be cached. Update `~/.ssh/known_hosts` with the current Bitbucket host key.
+
+---
+
+## Backfill Operations
+
+Backfills load historical data beyond the default initial load window. Use temporary release configurations — no code changes required.
+
+**Always create a new release for each backfill.** Do not edit an existing release's compilation variables and re-run — Dataform may cache the previous compilation. A fresh release avoids this.
+
+**Process:**
+
+1. Create a release named `backfill-YYYYMMDD-YYYYMMDD`, pointed at `main`
+2. Set compilation variable overrides (only what differs from defaults):
+   ```
+   FORCE_FULL_BACKFILL: true
+   BACKFILL_START_DATE: 20240101
+   BACKFILL_END_DATE: 20240131
+   ```
+3. Execute manually — select the `base_events` tag; downstream tables rebuild from it
+4. Verify in BigQuery, then delete the release
+
+For large backfills, split into monthly chunks with separate releases.
+
+**Safety:** Never add `FORCE_FULL_BACKFILL: 'true'` to `workflow_settings.yaml` — this would cause every scheduled run to attempt a full historical reload.
+
+---
 
 ## File Structure
 
 ```
 ├── includes/
 │   ├── core_config.js          ← Framework flags (backfill, ecommerce, initial load)
-│   ├── client_config.js         ← Client settings (streams, params, events)   [fork-owned]
+│   ├── client_config.js        ← Client settings (streams, params, events)   [fork-owned]
 │   ├── helper.js               ← Stream resolution, field refs, utilities
-│   ├── sql_generators.js        ← Parameter extraction, key generation, items array
-│   └── traffic_source.js        ← Attribution logic (default + custom)         [fork-owned]
+│   ├── sql_generators.js       ← Parameter extraction, key generation, items array
+│   └── traffic_source.js       ← Attribution logic (default + custom)        [fork-owned]
 ├── definitions/
 │   ├── outputs/
 │   │   ├── base_events_preops.sqlx   ← Cleanup operation (deletes 3-day window)
@@ -61,100 +233,22 @@ Daily runs delete and reload the last 3 days of `base_events`, then rebuild down
 │   │   ├── users.sqlx                ← User-level lifetime aggregations
 │   │   └── model_execution_log.sqlx  ← Pipeline audit log
 │   ├── custom/                       ← Client-specific models              [fork-owned]
-│   └── declaration.js                ← Source table declarations            [fork-owned]
-├── workflow_settings.yaml             ← Project settings & compilation vars [fork-owned]
+│   └── declaration.js                ← Source table declarations           [fork-owned]
+├── workflow_settings.yaml            ← Project settings & compilation vars [fork-owned]
 ├── .gitattributes                    ← Merge protection for fork-owned files
 └── README.md
 ```
 
-## Configuration
+---
 
-Configuration lives in the files themselves with inline documentation. Here's what to edit and why.
+## Known Gotchas
 
-**`workflow_settings.yaml`** — Project, dataset, location. Feature flags as compilation variables (`HAS_ECOMMERCE`).
+- **`ref()` registers compile-time dependencies even inside conditional logic.** If a model is conditionally skipped via a feature flag, any `ref()` calls inside that block still create dependency edges at compile time. Guard with `dataform.projectConfig.vars.HAS_ECOMMERCE === "true"` at the JS level, not just in SQL conditionals.
 
-**`includes/client_config.js`** — The main customization file:
-- `DATA_STREAM_TYPE` — `'web'`, `'app'`, or `'both'`
-- `CONSOLIDATE_WEB_APP_PARAMS` — only applies when `'both'`; merges page_location/firebase_screen into unified fields
-- `PROPERTIES_CONFIG` — leave `null` for single-property, or define multi-property/stream configuration (see examples in file)
-- `CORE_PARAMS_ARRAY`, `WEB_PARAMS_ARRAY`, `APP_PARAMS_ARRAY`, `CUSTOM_PARAMS_ARRAY` — which GA4 event parameters to extract (supported types: `string`, `int`, `float`, `double`)
-- `CUSTOM_ITEMS_PARAMS` — custom item-level parameters from the items array
-- `TRANSACTION_EVENTS`, `ECOMMERCE_ITEM_EVENTS` — which events populate ecommerce tables
+- **Both release config and workflow config are required for scheduled execution.** A release config alone does nothing — it must be paired with a workflow config that references it and defines the schedule.
 
-**`includes/traffic_source.js`** — Edit `getCustomTrafficSourceFields()` to remap sources, add fields, or define custom channel groupings. All returned fields flow automatically through sessions, users, and any model using the traffic source helpers.
+- **First run requires non-incremental execution.** The `base_events` pre-ops script deletes the 3-day rolling window before reloading. On the first run, the table doesn't exist yet — the script handles this safely, but the table must be created before incremental mode works correctly.
 
-## Operations
+- **Never add `FORCE_FULL_BACKFILL` to `workflow_settings.yaml`.** This flag belongs only in temporary backfill release configs. In `workflow_settings.yaml`, it would cause every scheduled run to reload all historical data.
 
-### Daily Runs
-
-Create a release pointing to `main`. Set a daily schedule after GA4 data finalizes. No compilation variables needed unless overriding defaults. The pipeline handles the 3-day rolling refresh automatically.
-
-### Backfill Operations
-
-Backfills load historical data beyond the default 7-day initial load. The process uses temporary release configurations with compilation variable overrides — no code changes required.
-
-**Always create a new release for each backfill. Do not edit an existing release's compilation variables and re-run it** — Dataform caches compilation results, and edited variables may not take effect without manually triggering a recompilation. Creating a fresh release avoids this entirely.
-
-**Process:**
-
-1. Create a new release named `backfill-YYYYMMDD-YYYYMMDD`
-2. Point it at `main`
-3. Set compilation variables (only what differs from defaults):
-   ```
-   FORCE_FULL_BACKFILL: true
-   BACKFILL_START_DATE: 20240101
-   BACKFILL_END_DATE: 20240131
-   ```
-   Add `DESTINATION_DATASET: ga4_reporting_dev` if testing in dev.
-4. Execute manually (select `base_events` tag for backfill — downstream tables rebuild from it)
-5. Verify data in BigQuery
-6. Delete the release when done
-
-For very large backfills, split into monthly chunks with separate releases.
-
-**Safety notes:**
-- Never add `FORCE_FULL_BACKFILL: 'true'` to `workflow_settings.yaml` — this would make every scheduled run attempt a full historical reload
-- Backfill releases should never have a schedule
-- Delete completed backfill releases to prevent accidental re-runs
-
-## Fork Strategy
-
-This repository serves as the upstream framework. Each client gets a fork with its own customizations.
-
-### Ownership Boundaries
-
-| File | Owner | Description |
-|------|-------|-------------|
-| `client_config.js` | Client fork | Parameters, stream config, events |
-| `traffic_source.js` | Client fork | Attribution logic |
-| `declaration.js` | Client fork | Source table declarations |
-| `workflow_settings.yaml` | Client fork | Project/dataset settings |
-| `definitions/custom/*` | Client fork | Client-specific models |
-| Everything else | Upstream | Framework code |
-
-### Pulling Upstream Updates
-
-Each client fork protects its owned files using `.gitattributes`:
-
-```
-includes/client_config.js merge=ours
-includes/traffic_source.js merge=ours
-definitions/declaration.js merge=ours
-definitions/custom/** merge=ours
-workflow_settings.yaml merge=ours
-```
-
-Configure the merge driver once per clone:
-```bash
-git config merge.ours.driver true
-```
-
-Then pull upstream updates:
-```bash
-git remote add upstream <upstream-repo-url>
-git fetch upstream
-git merge upstream/main --no-commit  # Review before finalizing
-git commit -m "Pull upstream framework updates"
-```
-
-Client-owned files are automatically preserved. Framework files update cleanly. If a client needs to modify a framework file, that's a signal to extract the customization point into configuration.
+- **Dataform may cache compilation results when you edit release config variables.** Always create a new release for backfills rather than editing an existing one's variables.

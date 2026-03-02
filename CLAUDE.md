@@ -19,7 +19,7 @@ When working in this repo, always consider that changes affect all downstream de
 - **Orchestration:** Dataform (part of the BigQuery / Google Cloud toolset)
 - **File types:** SQLX for data transformations, JavaScript for Dataform configuration and reusable functions
 - **Reporting layer:** Looker Studio (downstream)
-- **Version control:** GitHub and Bitbucket (varies by deployment)
+- **Version control:** Bitbucket (hs2studio workspace)
 - **IDE:** VS Code with Claude Code extension
 
 ## Project Structure
@@ -90,6 +90,29 @@ REGEXP_REPLACE(
   '/'
 ) AS page_path_clean
 ```
+
+## Git & Repository
+
+- **Platform:** Bitbucket (hs2studio workspace). GitHub is deprecated and should not be used.
+- **Upstream framework:** bitbucket.org/hs2studio/ga4-pipeline-framework
+- **Client fork pattern:** bitbucket.org/hs2studio/ga4-pipeline-{client-name}
+- **Never push to or reference GitHub remotes.**
+
+### Branching
+
+- Always commit to feature branches (`feature/{description}`)
+- Push feature branches to Bitbucket
+- Do NOT merge to main — leave that to the developer
+
+### One-Time Clone Setup (required for .gitattributes merge protection)
+
+After cloning any client fork, run this once to enable the `merge=ours` driver used by `.gitattributes`:
+
+```bash
+git config merge.ours.driver true
+```
+
+Without this, upstream merges will not automatically preserve client-owned files.
 
 ## Git Workflow
 

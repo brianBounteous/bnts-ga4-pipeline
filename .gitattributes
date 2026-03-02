@@ -1,0 +1,8 @@
+# Files owned by the client fork — preserved during upstream → fork merges.
+# Requires one-time local setup: git config merge.ours.driver true
+
+workflow_settings.yaml merge=ours
+includes/client_config.js merge=ours
+includes/traffic_source.js merge=ours
+definitions/declaration.js merge=ours
+definitions/custom/** merge=ours
