@@ -514,16 +514,22 @@ keys_added AS (
           page_title,
           page_referrer,
           REGEXP_EXTRACT(page_location, r'://[^/]+(/[^?#]*)') AS page_path,
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(page_location, ''), '?')[SAFE_OFFSET(0)])))) AS page_key
+          CASE WHEN page_location IS NOT NULL AND page_location != ''
+            THEN TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
+            ELSE NULL
+          END AS page_key
         ) AS page,
-        
+
         -- Page-session compound key for unique page view calculations
-        CONCAT(
-          COALESCE(stream_id, ''), '-',
-          COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-          COALESCE(user_id, ''), '-',
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(page_location, ''), '?')[SAFE_OFFSET(0)]))))
-        ) AS page_session_key`
+        CASE WHEN page_location IS NOT NULL AND page_location != ''
+          THEN CONCAT(
+            COALESCE(stream_id, ''), '-',
+            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+            COALESCE(user_id, ''), '-',
+            TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
+          )
+          ELSE NULL
+        END AS page_session_key`
         )}
         ${ when(
           effectiveDataStreamType === 'app',
@@ -532,16 +538,22 @@ keys_added AS (
           firebase_screen_class,
           firebase_screen_id,
           firebase_previous_screen,
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)])))) AS screen_key
+          CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
+            THEN TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
+            ELSE NULL
+          END AS screen_key
         ) AS app,
 
         -- Screen-session compound key for unique screen view calculations
-        CONCAT(
-          COALESCE(stream_id, ''), '-',
-          COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-          COALESCE(user_id, ''), '-',
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)]))))
-        ) AS screen_session_key`
+        CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
+          THEN CONCAT(
+            COALESCE(stream_id, ''), '-',
+            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+            COALESCE(user_id, ''), '-',
+            TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
+          )
+          ELSE NULL
+        END AS screen_session_key`
         )}
         ${ when(
           effectiveDataStreamType === 'both' && shouldConsolidate,
@@ -553,16 +565,22 @@ keys_added AS (
             REGEXP_EXTRACT(page_location, r'://[^/]+(/[^?#]*)'),
             firebase_screen
           ) AS page_path,
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(screen_location, ''), '?')[SAFE_OFFSET(0)])))) AS screen_key
+          CASE WHEN screen_location IS NOT NULL AND screen_location != ''
+            THEN TO_BASE64(MD5(LOWER(TRIM(SPLIT(screen_location, '?')[SAFE_OFFSET(0)]))))
+            ELSE NULL
+          END AS screen_key
         ) AS page,
-        
+
         -- Screen-session compound key for unique screen view calculations
-        CONCAT(
-          COALESCE(stream_id, ''), '-',
-          COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-          COALESCE(user_id, ''), '-',
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(screen_location, ''), '?')[SAFE_OFFSET(0)]))))
-        ) AS screen_session_key`
+        CASE WHEN screen_location IS NOT NULL AND screen_location != ''
+          THEN CONCAT(
+            COALESCE(stream_id, ''), '-',
+            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+            COALESCE(user_id, ''), '-',
+            TO_BASE64(MD5(LOWER(TRIM(SPLIT(screen_location, '?')[SAFE_OFFSET(0)]))))
+          )
+          ELSE NULL
+        END AS screen_session_key`
         )}
         ${ when(
           effectiveDataStreamType === 'both' && !shouldConsolidate,
@@ -571,31 +589,43 @@ keys_added AS (
           page_title,
           page_referrer,
           REGEXP_EXTRACT(page_location, r'://[^/]+(/[^?#]*)') AS page_path,
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(page_location, ''), '?')[SAFE_OFFSET(0)])))) AS page_key
+          CASE WHEN page_location IS NOT NULL AND page_location != ''
+            THEN TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
+            ELSE NULL
+          END AS page_key
         ) AS page,
-        
+
         STRUCT(
           firebase_screen,
           firebase_screen_class,
           firebase_screen_id,
           firebase_previous_screen,
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)])))) AS screen_key
+          CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
+            THEN TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
+            ELSE NULL
+          END AS screen_key
         ) AS app,
 
         -- Both page-session and screen-session compound keys
-        CONCAT(
-          COALESCE(stream_id, ''), '-',
-          COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-          COALESCE(user_id, ''), '-',
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(page_location, ''), '?')[SAFE_OFFSET(0)]))))
-        ) AS page_session_key,
+        CASE WHEN page_location IS NOT NULL AND page_location != ''
+          THEN CONCAT(
+            COALESCE(stream_id, ''), '-',
+            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+            COALESCE(user_id, ''), '-',
+            TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
+          )
+          ELSE NULL
+        END AS page_session_key,
 
-        CONCAT(
-          COALESCE(stream_id, ''), '-',
-          COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-          COALESCE(user_id, ''), '-',
-          TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class, ''), '?')[SAFE_OFFSET(0)]))))
-        ) AS screen_session_key`
+        CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
+          THEN CONCAT(
+            COALESCE(stream_id, ''), '-',
+            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+            COALESCE(user_id, ''), '-',
+            TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
+          )
+          ELSE NULL
+        END AS screen_session_key`
         )}
         
     FROM ${ when(shouldConsolidate, 'consolidated_params', 'processed_events') }
