@@ -35,22 +35,23 @@ js {
 WITH page_view_events AS (
   SELECT
     -- Keys
-   CONCAT(${screenFields.key}, '_', session_key) AS page_session_key,
-    
+    CONCAT(${screenFields.key}, '_', session_key) AS page_session_key,
+
     ${screenFields.key} AS page_key,
     session_key,
+    ga_session_id,
     user_id,
     user_pseudo_id,
-    
+
     -- Dates & timestamps
     event_date,
     event_timestamp,
-    
+
     -- Page attributes (for convenience, though available via FK)
     ${screenFields.location} AS page_location,
     ${screenFields.path} AS page_path,
     ${screenFields.title} AS page_title,
-    
+
     -- Engagement metrics
     engagement_time_msec,
     percent_scrolled,
@@ -74,22 +75,21 @@ WITH page_view_events AS (
     )}
 ),
 
--- Calculate time on page using next event timestamp
+-- Calculate page view sequence number within session
 page_view_with_next_event AS (
   SELECT
     *,
-    -- Get next event timestamp within the same session
-    LEAD(event_timestamp) OVER (
-      PARTITION BY session_key 
-      ORDER BY event_timestamp
-    ) AS next_event_timestamp,
-    
-    -- Get page view sequence number within session
-    ROW_NUMBER() OVER (
-      PARTITION BY session_key 
-      ORDER BY event_timestamp
-    ) AS page_view_number
-    
+
+    -- Null-safe page view sequence: NULL when ga_session_id is NULL to avoid
+    -- degenerate ROW_NUMBER values across all sessionless events sharing one key
+    CASE WHEN ga_session_id IS NOT NULL
+      THEN ROW_NUMBER() OVER (
+        PARTITION BY session_key
+        ORDER BY event_timestamp
+      )
+      ELSE NULL
+    END AS page_view_number
+
   FROM page_view_events
 ),
 
@@ -122,14 +122,7 @@ page_session_aggregated AS (
     
     -- Sequence
     MIN(pv.page_view_number) AS page_view_number,
-    
-    -- Time on page (calculate from events)
-    TIMESTAMP_DIFF(
-      TIMESTAMP_MICROS(MIN(pv.next_event_timestamp)),
-      TIMESTAMP_MICROS(MIN(pv.event_timestamp)),
-      SECOND
-    ) AS time_on_page_seconds,
-    
+
     -- Engagement metrics
     SUM(COALESCE(pv.engagement_time_msec, 0)) AS total_engagement_time_msec,
     MAX(COALESCE(pv.percent_scrolled, 0)) AS max_scroll_depth,
@@ -170,13 +163,10 @@ SELECT
   
   -- Sequence
   page_view_number,
-  
-  -- Time metrics
-  time_on_page_seconds,
+
+  -- Engagement metrics
   total_engagement_time_msec,
   ROUND(total_engagement_time_msec / 1000, 2) AS total_engagement_time_seconds,
-  
-  -- Engagement metrics
   max_scroll_depth,
   page_view_event_count,
   
