@@ -1,3 +1,14 @@
+js {
+  const helpers = require('includes/helper.js');
+  const config = helpers.getConfig();
+  const effectiveDataStreamType = helpers.getEffectiveDataStreamType();
+  const screenFields = helpers.getScreenFieldRefs();
+  const outputCols = helpers.getOutputColumnNames();
+
+  console.log(`[DIM_PAGES] Building page/screen dimension table`);
+  console.log(`[DIM_PAGES] Effective data stream type: ${effectiveDataStreamType}`);
+}
+
 config {
   type: "table",
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
@@ -5,36 +16,18 @@ config {
   tags: ["daily", "ga4", "pages", "dimensions", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
-    clusterBy: ["page_key", "screen_type"]
+    clusterBy: [outputCols.key, "screen_type"]
   }
 }
 
-js {
-  const helpers = require('includes/helper.js');
-  const config = helpers.getConfig();
-  const effectiveDataStreamType = helpers.getEffectiveDataStreamType();
-  const screenFields = helpers.getScreenFieldRefs();
-  
-  console.log(`[DIM_PAGES] Building page dimension table`);
-  console.log(`[DIM_PAGES] Effective data stream type: ${effectiveDataStreamType}`);
-}
-
--- Get all unique pages from base_events with their attributes
+-- Get all unique pages/screens from base_events with their attributes
 WITH page_attributes AS (
   SELECT
-    ${screenFields.key} AS page_key,
-    ${screenFields.location} AS page_location,
-    ${screenFields.path} AS page_path,
-    ${screenFields.title} AS page_title,
-    ${ when(effectiveDataStreamType === 'web',
-      `REGEXP_EXTRACT(${screenFields.location}, r'://([^/]+)') AS page_hostname,`
-    )}
-    ${ when(effectiveDataStreamType === 'app',
-      `CAST(NULL AS STRING) AS page_hostname,`
-    )}
-   ${ when(effectiveDataStreamType === 'both',
-  `REGEXP_EXTRACT(${screenFields.location}, r'://([^/]+)') AS page_hostname,`
-    )}
+    ${screenFields.key} AS ${outputCols.key},
+    ${screenFields.location} AS ${outputCols.location},
+    ${screenFields.title} AS ${outputCols.title},
+    ${ when(outputCols.path !== null, `${screenFields.path} AS ${outputCols.path},`) }
+    ${ when(outputCols.hostname !== null, `${screenFields.hostname} AS ${outputCols.hostname},`) }
     screen_type,
     event_date
   FROM ${ref("base_events")}
@@ -42,32 +35,32 @@ WITH page_attributes AS (
     AND ${screenFields.key} != ''
 ),
 
--- Get first and last seen dates for each page
+-- Get first and last seen dates with most recent attribute values
 page_summary AS (
   SELECT
-    page_key,
+    ${outputCols.key},
     -- Use most recent values for current snapshot
-    APPROX_TOP_COUNT(page_location, 1)[OFFSET(0)].value AS page_location,
-    APPROX_TOP_COUNT(page_path, 1)[OFFSET(0)].value AS page_path,
-    APPROX_TOP_COUNT(page_title, 1)[OFFSET(0)].value AS page_title,
-    APPROX_TOP_COUNT(page_hostname, 1)[OFFSET(0)].value AS page_hostname,
+    APPROX_TOP_COUNT(${outputCols.location}, 1)[OFFSET(0)].value AS ${outputCols.location},
+    APPROX_TOP_COUNT(${outputCols.title}, 1)[OFFSET(0)].value AS ${outputCols.title},
+    ${ when(outputCols.path !== null, `APPROX_TOP_COUNT(${outputCols.path}, 1)[OFFSET(0)].value AS ${outputCols.path},`) }
+    ${ when(outputCols.hostname !== null, `APPROX_TOP_COUNT(${outputCols.hostname}, 1)[OFFSET(0)].value AS ${outputCols.hostname},`) }
     APPROX_TOP_COUNT(screen_type, 1)[OFFSET(0)].value AS screen_type,
     MIN(event_date) AS first_seen_date,
     MAX(event_date) AS last_seen_date,
     CURRENT_TIMESTAMP() AS last_updated_timestamp
   FROM page_attributes
-  GROUP BY page_key
+  GROUP BY ${outputCols.key}
 )
 
 SELECT
-  page_key,
-  page_location,
-  page_path,
-  page_title,
-  page_hostname,
+  ${outputCols.key},
+  ${outputCols.location},
+  ${outputCols.title},
+  ${ when(outputCols.path !== null, `${outputCols.path},`) }
+  ${ when(outputCols.hostname !== null, `${outputCols.hostname},`) }
   screen_type,
   first_seen_date,
   last_seen_date,
   last_updated_timestamp
 FROM page_summary
-WHERE page_key IS NOT NULL
+WHERE ${outputCols.key} IS NOT NULL

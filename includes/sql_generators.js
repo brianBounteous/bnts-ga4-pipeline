@@ -16,7 +16,7 @@ const config = helpers.getConfig();
 function extractParamsSQL(paramsArray, sourceArray = 'event_params') {
   return paramsArray.map(param => {
     let valueField;
-    
+
     switch(param.type.toLowerCase()) {
       case 'string':
         valueField = 'string_value'; break;
@@ -29,7 +29,7 @@ function extractParamsSQL(paramsArray, sourceArray = 'event_params') {
       default:
         throw new Error(`Unsupported parameter type: ${param.type} for parameter: ${param.name}`);
     }
-    
+
     return `(SELECT value.${valueField} FROM UNNEST(${sourceArray}) WHERE key = '${param.name}') AS ${param.name}`;
   }).join(',\n        ');
 }
@@ -66,48 +66,6 @@ function EXTRACT_CUSTOM_PARAMS(sourceArray = 'event_params') {
   return extractParamsSQL(config.CUSTOM_PARAMS_ARRAY, sourceArray);
 }
 
-/**
- * Generates consolidation SQL for web/app parameters
- * Creates unified fields when CONSOLIDATE_WEB_APP_PARAMS = true
- */
-function CONSOLIDATE_PARAMS() {
-  const effectiveType = helpers.getEffectiveDataStreamType();
-  
-  if (effectiveType !== 'both' || !config.CONSOLIDATE_WEB_APP_PARAMS) {
-    return '';
-  }
-  
-  const consolidationMap = {};
-  
-  config.WEB_PARAMS_ARRAY.forEach(param => {
-    if (param.consolidated_name) {
-      if (!consolidationMap[param.consolidated_name]) {
-        consolidationMap[param.consolidated_name] = { web: null, app: null };
-      }
-      consolidationMap[param.consolidated_name].web = param.name;
-    }
-  });
-  
-  config.APP_PARAMS_ARRAY.forEach(param => {
-    if (param.consolidated_name) {
-      if (!consolidationMap[param.consolidated_name]) {
-        consolidationMap[param.consolidated_name] = { web: null, app: null };
-      }
-      consolidationMap[param.consolidated_name].app = param.name;
-    }
-  });
-  
-  const consolidations = Object.keys(consolidationMap).map(consolidatedName => {
-    const sources = consolidationMap[consolidatedName];
-    const fields = [];
-    if (sources.web) fields.push(sources.web);
-    if (sources.app) fields.push(sources.app);
-    return `COALESCE(${fields.join(', ')}) AS ${consolidatedName}`;
-  });
-  
-  return consolidations.join(',\n        ');
-}
-
 // ============================================================================
 // KEY GENERATION
 // ============================================================================
@@ -118,7 +76,7 @@ function CONSOLIDATE_PARAMS() {
  */
 function GENERATE_EVENT_KEY_CONCAT() {
   const effectiveType = helpers.getEffectiveDataStreamType();
-  
+
   const fields = [
     "COALESCE(user_id, '')",
     "COALESCE(CAST(ga_session_id AS STRING), '')",
@@ -128,50 +86,27 @@ function GENERATE_EVENT_KEY_CONCAT() {
     "COALESCE(CAST(batch_event_index AS STRING), '')",
     "COALESCE(CAST(event_bundle_sequence_id AS STRING), '')"
   ];
-  
+
   config.CORE_PARAMS_ARRAY.forEach(param => {
     fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
   });
-  
-  if (effectiveType === 'both' && config.CONSOLIDATE_WEB_APP_PARAMS) {
-    const consolidatedNames = new Set();
-    
+
+  if (effectiveType === 'web' || effectiveType === 'both') {
     config.WEB_PARAMS_ARRAY.forEach(param => {
-      if (param.consolidated_name) {
-        consolidatedNames.add(param.consolidated_name);
-      }
+      fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
     });
-    
-    config.APP_PARAMS_ARRAY.forEach(param => {
-      if (param.consolidated_name) {
-        consolidatedNames.add(param.consolidated_name);
-      } else {
-        fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
-      }
-    });
-    
-    consolidatedNames.forEach(name => {
-      fields.push(`COALESCE(${name}, '')`);
-    });
-    
-  } else {
-    if (effectiveType === 'web' || effectiveType === 'both') {
-      config.WEB_PARAMS_ARRAY.forEach(param => {
-        fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
-      });
-    }
-    
-    if (effectiveType === 'app' || effectiveType === 'both') {
-      config.APP_PARAMS_ARRAY.forEach(param => {
-        fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
-      });
-    }
   }
-  
+
+  if (effectiveType === 'app' || effectiveType === 'both') {
+    config.APP_PARAMS_ARRAY.forEach(param => {
+      fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
+    });
+  }
+
   config.CUSTOM_PARAMS_ARRAY.forEach(param => {
     fields.push(`COALESCE(CAST(${param.name} AS STRING), '')`);
   });
-  
+
   return fields.join(", '-', ");
 }
 
@@ -184,10 +119,10 @@ function GENERATE_EVENT_KEY_CONCAT() {
  */
 function EXTRACT_USER_PROPS(sourceArray = 'user_properties') {
   if (config.CORE_USER_PROPS_ARRAY.length === 0) return '';
-  
+
   return config.CORE_USER_PROPS_ARRAY.map(prop => {
     let valueField;
-    
+
     switch(prop.type.toLowerCase()) {
       case 'string':
         valueField = 'string_value'; break;
@@ -200,7 +135,7 @@ function EXTRACT_USER_PROPS(sourceArray = 'user_properties') {
       default:
         throw new Error(`Unsupported property type: ${prop.type} for property: ${prop.name}`);
     }
-    
+
     return `(SELECT value.${valueField} FROM UNNEST(${sourceArray}) WHERE key = '${prop.name}') AS ${prop.name}`;
   }).join(',\n        ');
 }
@@ -215,7 +150,7 @@ function EXTRACT_USER_PROPS(sourceArray = 'user_properties') {
 function generateItemParamsSQL(paramsConfig, sourceArray) {
   return paramsConfig.map(param => {
     let valueField;
-    
+
     switch(param.type.toLowerCase()) {
       case 'string':
         valueField = 'string_value'; break;
@@ -228,7 +163,7 @@ function generateItemParamsSQL(paramsConfig, sourceArray) {
       default:
         throw new Error(`Unsupported item parameter type: ${param.type} for parameter: ${param.name}`);
     }
-    
+
     return `(SELECT value.${valueField} FROM UNNEST(${sourceArray}) WHERE key = '${param.name}') AS ${param.name}`;
   }).join(',\n                ');
 }
@@ -247,14 +182,14 @@ function generateStructSQL(paramsSQL) {
  */
 function EXTRACT_ITEMS_ARRAY() {
   const hasCustomParams = config.CUSTOM_ITEMS_PARAMS && config.CUSTOM_ITEMS_PARAMS.length > 0;
-  
+
   let customParamsSQL = '';
   if (hasCustomParams) {
     const paramsSQL = generateItemParamsSQL(config.CUSTOM_ITEMS_PARAMS, 'items.item_params');
     customParamsSQL = `,
                 ${generateStructSQL(paramsSQL)} AS item_params_custom`;
   }
-  
+
   return `ARRAY(
         (
             SELECT
@@ -301,14 +236,13 @@ module.exports = {
   EXTRACT_WEB_PARAMS,
   EXTRACT_APP_PARAMS,
   EXTRACT_CUSTOM_PARAMS,
-  CONSOLIDATE_PARAMS,
-  
+
   // Key Generation
   GENERATE_EVENT_KEY_CONCAT,
-  
+
   // User Properties
   EXTRACT_USER_PROPS,
-  
+
   // Items Array
   EXTRACT_ITEMS_ARRAY
 };
