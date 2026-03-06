@@ -17,7 +17,7 @@ config {
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
     partitionBy: "event_date",
-    clusterBy: [outputCols.key, "session_key"]
+    clusterBy: ["session_key"]
   }
 }
 
