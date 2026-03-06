@@ -16,7 +16,7 @@ config {
   tags: ["daily", "ga4", "pages", "dimensions", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
-    clusterBy: [outputCols.key, "screen_type"]
+    clusterBy: ["screen_type"]
   }
 }
 
