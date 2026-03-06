@@ -9,12 +9,8 @@
 
 /**
  * GA4 Properties and Data Streams Configuration
- * 
- * SIMPLE MODE (default): Leave null to process all streams from the single 
- * property/dataset defined in workflow_settings.yaml
- * 
- * ADVANCED MODE: Define multiple properties and granular stream-level control
- * 
+ * Required — define at least one property with at least one included stream.
+ *
  * Structure:
  * {
  *   'property_name': {
@@ -29,9 +25,8 @@
  *   }
  * }
  */
-const PROPERTIES_CONFIG = null;
 
-// Example multi-property configuration:
+// Example configuration:
 // const PROPERTIES_CONFIG = {
 //   'main_website': {
 //     source_dataset: 'analytics_123456789',
@@ -48,19 +43,9 @@ const PROPERTIES_CONFIG = null;
 //   }
 // };
 
-/**
- * Default data stream type (used when PROPERTIES_CONFIG is null)
- * Options: 'web', 'app', or 'both'
- */
-const DATA_STREAM_TYPE = 'web';
-
-/**
- * Parameter consolidation for combined web/app streams
- * ONLY applies when DATA_STREAM_TYPE = 'both'. Set to 'false' by default
- * true: Consolidates parameters (page_location + firebase_screen → screen_location)
- * false: Keeps web and app parameters separate in their respective STRUCTs
- */
-const CONSOLIDATE_WEB_APP_PARAMS = false;
+const PROPERTIES_CONFIG = {
+  // Configure your GA4 properties here. See the example above.
+};
 
 /**
  * Fresh daily table usage
@@ -93,40 +78,38 @@ const CORE_PARAMS_ARRAY = [
     { name: "ga_session_number", type: "int" },
     { name: "ignore_referrer", type: "string" },
     { name: "percent_scrolled", type: "int" },
-    { name: "session_engaged", type: "string" }
-];
-
-/**
- * Web-specific event parameters (extracted when stream_type = 'web')
- * consolidated_name: Used when CONSOLIDATE_WEB_APP_PARAMS = true
- */
-const WEB_PARAMS_ARRAY = [
-    { name: "link_classes", type: "string" },
-    { name: "link_text", type: "string" },
-    { name: "link_url", type: "string" },
-    { name: "page_location", type: "string", consolidated_name: "screen_location" },
-    { name: "page_referrer", type: "string", consolidated_name: "screen_referrer" },
-    { name: "page_title", type: "string", consolidated_name: "screen_title" },
+    { name: "session_engaged", type: "string" },
     { name: "video_current_time", type: "int" },
     { name: "video_duration", type: "int" },
     { name: "video_percent", type: "int" },
     { name: "video_provider", type: "string" },
     { name: "video_title", type: "string" },
-    { name: "video_url", type: "string" },
+    { name: "video_url", type: "string" }
+];
+
+/**
+ * Web-specific event parameters (extracted when stream_type = 'web')
+ */
+const WEB_PARAMS_ARRAY = [
+    { name: "link_classes", type: "string" },
+    { name: "link_text", type: "string" },
+    { name: "link_url", type: "string" },
+    { name: "page_location", type: "string" },
+    { name: "page_referrer", type: "string" },
+    { name: "page_title", type: "string" },
     { name: "visible", type: "string" }
 ];
 
 /**
  * App-specific event parameters (extracted when stream_type = 'app')
- * consolidated_name: Used when CONSOLIDATE_WEB_APP_PARAMS = true
  */
 const APP_PARAMS_ARRAY = [
     { name: "firebase_conversion", type: "int" },
     { name: "firebase_previous_class", type: "string" },
     { name: "firebase_previous_id", type: "string" },
-    { name: "firebase_previous_screen", type: "string", consolidated_name: "screen_referrer" },
-    { name: "firebase_screen", type: "string", consolidated_name: "screen_location" },
-    { name: "firebase_screen_class", type: "string", consolidated_name: "screen_title" },
+    { name: "firebase_previous_screen", type: "string" },
+    { name: "firebase_screen", type: "string" },
+    { name: "firebase_screen_class", type: "string" },
     { name: "firebase_screen_id", type: "string" }
 ];
 
@@ -187,8 +170,6 @@ const ECOMMERCE_ITEM_EVENTS = [
 const clientConfig = {
     // Property & Stream Config
     PROPERTIES_CONFIG,
-    DATA_STREAM_TYPE,
-    CONSOLIDATE_WEB_APP_PARAMS,
     USE_FRESH_DAILY,
     USE_CUSTOM_TRAFFIC_SOURCE_LOGIC,
 

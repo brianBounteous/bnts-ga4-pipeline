@@ -19,24 +19,14 @@ const config = getConfig();
 // ============================================================================
 
 /**
- * Determines if using simple or advanced property configuration
- */
-function isAdvancedMode() {
-  return config.PROPERTIES_CONFIG !== null && config.PROPERTIES_CONFIG !== undefined;
-}
-
-/**
  * Gets all included streams across all properties
+ * PROPERTIES_CONFIG is required — throws if missing or empty
  */
 function getIncludedStreams() {
-  if (!isAdvancedMode()) {
-    return [{
-      simple_mode: true,
-      stream_type: config.DATA_STREAM_TYPE,
-      use_fresh_daily: config.USE_FRESH_DAILY
-    }];
+  if (!config.PROPERTIES_CONFIG || Object.keys(config.PROPERTIES_CONFIG).length === 0) {
+    throw new Error('PROPERTIES_CONFIG is required. Configure at least one property with streams in client_config.js');
   }
-  
+
   const streams = [];
   Object.keys(config.PROPERTIES_CONFIG).forEach(propertyName => {
     const property = config.PROPERTIES_CONFIG[propertyName];
@@ -53,7 +43,7 @@ function getIncludedStreams() {
       }
     });
   });
-  
+
   return streams;
 }
 
@@ -62,63 +52,30 @@ function getIncludedStreams() {
  * @returns {string} 'web', 'app', or 'both'
  */
 function getEffectiveDataStreamType() {
-  if (!isAdvancedMode()) {
-    return config.DATA_STREAM_TYPE;
-  }
-  
   const streams = getIncludedStreams();
   const hasWeb = streams.some(s => s.stream_type === 'web');
   const hasApp = streams.some(s => s.stream_type === 'app');
-  
+
   if (hasWeb && hasApp) return 'both';
   if (hasWeb) return 'web';
   if (hasApp) return 'app';
-  
+
   return 'both';
 }
 
 /**
- * Determines if parameter consolidation should occur
- */
-function shouldConsolidateParams() {
-  const effectiveType = getEffectiveDataStreamType();
-  return effectiveType === 'both' && config.CONSOLIDATE_WEB_APP_PARAMS;
-}
-
-/**
- * Gets the consolidated field name for a given parameter
- */
-function getConsolidatedFieldName(paramName) {
-  const webParam = config.WEB_PARAMS_ARRAY.find(p => p.name === paramName);
-  if (webParam && webParam.consolidated_name) {
-    return webParam.consolidated_name;
-  }
-  
-  const appParam = config.APP_PARAMS_ARRAY.find(p => p.name === paramName);
-  if (appParam && appParam.consolidated_name) {
-    return appParam.consolidated_name;
-  }
-  
-  return null;
-}
-
-/**
- * Generates SQL filter for stream_id (used in advanced mode)
+ * Generates SQL filter for stream_id (used in multi-property mode)
  */
 function generateStreamFilter(propertyName) {
-  if (!isAdvancedMode()) {
-    return '1=1';
-  }
-  
   const property = config.PROPERTIES_CONFIG[propertyName];
   if (!property) {
     throw new Error(`Property ${propertyName} not found in PROPERTIES_CONFIG`);
   }
-  
+
   const includedStreamIds = Object.keys(property.streams)
     .filter(streamId => property.streams[streamId].include !== false)
     .map(streamId => `'${streamId}'`);
-  
+
   if (includedStreamIds.length === 0) return '1=0';
   if (includedStreamIds.length === 1) return `stream_id = ${includedStreamIds[0]}`;
   return `stream_id IN (${includedStreamIds.join(', ')})`;
@@ -129,51 +86,87 @@ function generateStreamFilter(propertyName) {
 // ============================================================================
 
 /**
- * Gets screen field references for session aggregations
- * Returns appropriate field paths based on web/app/both configuration
+ * Gets screen/page field source expressions from base_events structs.
+ * Used in CTEs that reference base_events columns.
+ * Returns null for fields not applicable to the stream type.
  */
 function getScreenFieldRefs() {
   const effectiveType = getEffectiveDataStreamType();
-  const consolidate = shouldConsolidateParams();
-  
+
   if (effectiveType === 'web') {
     return {
+      key: 'page.page_key',
       location: 'page.page_location',
       path: 'page.page_path',
       referrer: 'page.page_referrer',
-      key: 'page.page_key',
-      title: 'page.page_title'
+      title: 'page.page_title',
+      hostname: "REGEXP_EXTRACT(page.page_location, r'://([^/]+)')"
     };
   }
-  
+
   if (effectiveType === 'app') {
     return {
-      location: 'COALESCE(app.firebase_screen, app.firebase_screen_class)',
-      path: 'app.firebase_screen_class',
-      referrer: 'app.firebase_previous_screen',
       key: 'app.screen_key',
-      title: 'COALESCE(app.firebase_screen, app.firebase_screen_class)'
+      location: 'COALESCE(app.firebase_screen, app.firebase_screen_class)',
+      path: null,
+      referrer: 'app.firebase_previous_screen',
+      title: 'COALESCE(app.firebase_screen, app.firebase_screen_class)',
+      hostname: null
     };
   }
-  
-  // For 'both'
-  if (consolidate) {
+
+  // 'both' — COALESCE across page and app structs
+  return {
+    key: 'COALESCE(page.page_key, app.screen_key)',
+    location: 'COALESCE(page.page_location, app.firebase_screen, app.firebase_screen_class)',
+    path: 'page.page_path',
+    referrer: 'COALESCE(page.page_referrer, app.firebase_previous_screen)',
+    title: 'COALESCE(page.page_title, app.firebase_screen, app.firebase_screen_class)',
+    hostname: "REGEXP_EXTRACT(page.page_location, r'://([^/]+)')"
+  };
+}
+
+/**
+ * Gets the output column name aliases for reporting tables (dim_pages, fct_page_views).
+ * Null values indicate the column should be omitted entirely for that stream type.
+ */
+function getOutputColumnNames() {
+  const effectiveType = getEffectiveDataStreamType();
+
+  if (effectiveType === 'web') {
     return {
-      location: 'page.screen_location',
-      path: 'page.page_path',
-      referrer: 'page.screen_referrer',
-      key: 'page.screen_key',
-      title: 'page.screen_title'
-    };
-  } else {
-    return {
-      location: 'COALESCE(page.page_location, app.firebase_screen, app.firebase_screen_class)',
-      path: 'COALESCE(page.page_path, app.firebase_screen_class)',
-      referrer: 'COALESCE(page.page_referrer, app.firebase_previous_screen)',
-      key: 'COALESCE(page.page_key, app.screen_key)',
-      title: 'COALESCE(page.page_title, app.firebase_screen, app.firebase_screen_class)'
+      key: 'page_key',
+      session_key: 'page_session_key',
+      location: 'page_location',
+      path: 'page_path',
+      referrer: 'page_referrer',
+      title: 'page_title',
+      hostname: 'page_hostname'
     };
   }
+
+  if (effectiveType === 'app') {
+    return {
+      key: 'screen_key',
+      session_key: 'screen_session_key',
+      location: 'screen_location',
+      path: null,
+      referrer: 'screen_referrer',
+      title: 'screen_title',
+      hostname: null
+    };
+  }
+
+  // 'both'
+  return {
+    key: 'content_key',
+    session_key: 'content_session_key',
+    location: 'content_location',
+    path: 'page_path',
+    referrer: 'content_referrer',
+    title: 'content_title',
+    hostname: 'page_hostname'
+  };
 }
 
 /**
@@ -181,13 +174,11 @@ function getScreenFieldRefs() {
  */
 function getPageSessionKeyRef() {
   const effectiveType = getEffectiveDataStreamType();
-  const consolidate = shouldConsolidateParams();
-  
+
   if (effectiveType === 'web') return 'page_session_key';
   if (effectiveType === 'app') return 'screen_session_key';
-  
+
   // both
-  if (consolidate) return 'screen_session_key';
   return 'COALESCE(page_session_key, screen_session_key)';
 }
 
@@ -231,22 +222,20 @@ function GET_BACKFILL_END_DATE() {
 module.exports = {
   // Config
   getConfig,
-  
+
   // Property & Stream Helpers
-  isAdvancedMode,
   getIncludedStreams,
   getEffectiveDataStreamType,
-  shouldConsolidateParams,
-  getConsolidatedFieldName,
   generateStreamFilter,
-  
+
   // Field Reference Helpers
   getScreenFieldRefs,
+  getOutputColumnNames,
   getPageSessionKeyRef,
-  
+
   // String & Utility Helpers
   REPLACE_NULL_STRING,
-  
+
   // Date & Backfill Helpers
   EXCLUDE_INTRADAY_TABLES,
   GET_BACKFILL_START_DATE,

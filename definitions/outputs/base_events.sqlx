@@ -1,6 +1,6 @@
 config {
   type: "incremental",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET, 
+  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
   description: "Events records with 3-day rolling refresh to capture late arrivals",
   tags: ["daily", "ga4", "core"],
   dependencies: ["base_events_preops"],
@@ -14,7 +14,6 @@ js {
   const helpers = require('includes/helper.js');
   const config = helpers.getConfig();
   const effectiveDataStreamType = helpers.getEffectiveDataStreamType();
-  const shouldConsolidate = helpers.shouldConsolidateParams();
   const sqlGen = require('includes/sql_generators.js');
 
   // ============================================================================
@@ -102,154 +101,26 @@ js {
   // GENERATE RAW DATA SQL
   // ============================================================================
 
-  let rawDataSQL;
+  console.log('[BASE_EVENTS] Constructing UNION ALL across properties');
+  const isIncremental = incremental();
 
-  if (helpers.isAdvancedMode()) {
-    // Advanced mode: UNION ALL across all properties
-    console.log('[BASE_EVENTS] Advanced mode: constructing UNION ALL across properties');
-    const isIncremental = incremental();
+  const propertySQLs = Object.keys(config.PROPERTIES_CONFIG).map(propertyName => {
+    const property = config.PROPERTIES_CONFIG[propertyName];
+    console.log(`[BASE_EVENTS] Property: ${propertyName}, Dataset: ${property.source_dataset}`);
+    return generatePropertySQL(propertyName, property, isIncremental);
+  });
 
-    const propertySQLs = Object.keys(config.PROPERTIES_CONFIG).map(propertyName => {
-      const property = config.PROPERTIES_CONFIG[propertyName];
-      console.log(`[BASE_EVENTS] Property: ${propertyName}, Dataset: ${property.source_dataset}`);
-      return generatePropertySQL(propertyName, property, isIncremental);
-    });
+  const rawDataSQL = propertySQLs.join('\n\nUNION ALL\n\n');
 
-    rawDataSQL = propertySQLs.join('\n\nUNION ALL\n\n');
-
-    console.log(`[BASE_EVENTS] Effective data stream type: ${effectiveDataStreamType}`);
-    if (effectiveDataStreamType === 'both') {
-      console.log(`[BASE_EVENTS] Consolidate web/app params: ${shouldConsolidate}`);
-    }
-  } else {
-    // Simple mode: original logic (unchanged)
-    rawDataSQL = null; // Will use existing when() logic below
-  }
-
-  // ============================================================================
-  // SIMPLE MODE VARIABLES (unchanged)
-  // ============================================================================
-
-  let dateFilter;
-  let sourceTable;
-  let useMixedSources = false;
-
-  if (!helpers.isAdvancedMode() && !incremental()) {
-    // Table doesn't exist - determine initial load strategy
-    
-    if (config.FORCE_FULL_BACKFILL) {
-      // Manual full backfill mode
-      const startDate = helpers.GET_BACKFILL_START_DATE();
-      const endDate = helpers.GET_BACKFILL_END_DATE();
-      
-      const startDateSQL = startDate.includes('FORMAT_DATE') ? `(${startDate})` : `'${startDate}'`;
-      const endDateSQL = endDate.includes('FORMAT_DATE') ? `(${endDate})` : `'${endDate}'`;
-      
-      dateFilter = `_TABLE_SUFFIX BETWEEN ${startDateSQL} AND ${endDateSQL}`;
-      sourceTable = ref("events_*");
-      
-      console.log(`[BASE_EVENTS] FULL BACKFILL MODE: Loading from ${startDate} to ${endDate}`);
-    } else {
-      // Initial 7-day load (safe default)
-      const daysBack = config.INITIAL_LOAD_DAYS;
-      
-      if (config.USE_FRESH_DAILY) {
-        console.log(`[BASE_EVENTS] Initial ${daysBack}-day load with mixed sources`);
-        console.log(`[BASE_EVENTS] - Days 1-2: events_fresh_*`);
-        console.log(`[BASE_EVENTS] - Days 3-${daysBack}: events_*`);
-        
-        useMixedSources = true;
-        dateFilter = null;
-        sourceTable = null;
-      } else {
-        dateFilter = `_TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL ${daysBack} DAY)) 
-                      AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))`;
-        sourceTable = ref("events_*");
-        
-        console.log(`[BASE_EVENTS] Initial ${daysBack}-day load from events_*`);
-      }
-    }
-  } else if (!helpers.isAdvancedMode()) {
-    // Incremental mode: Load last 3 days with smart table selection
-    if (config.USE_FRESH_DAILY) {
-      console.log(`[BASE_EVENTS] 3-day rolling refresh with mixed sources`);
-      console.log(`[BASE_EVENTS] - Days 1-2: events_fresh_*`);
-      console.log(`[BASE_EVENTS] - Day 3: events_*`);
-
-      useMixedSources = true;
-      dateFilter = null;
-      sourceTable = null;
-    } else {
-      dateFilter = `_TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
-                    AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))`;
-      sourceTable = ref("events_*");
-
-      console.log(`[BASE_EVENTS] 3-day rolling refresh from events_*`);
-    }
-  }
-
-  if (!helpers.isAdvancedMode()) {
-    console.log(`[BASE_EVENTS] Effective data stream type: ${effectiveDataStreamType}`);
-    if (effectiveDataStreamType === 'both') {
-      console.log(`[BASE_EVENTS] Consolidate web/app params: ${shouldConsolidate}`);
-    }
-  }
-
-  // Simple mode ref guards: prevents ambiguous ref() when multiple schemas are declared in advanced mode.
-  // In advanced mode these are null; the branches that use them are never rendered in that case.
-  const simpleEventsRef = helpers.isAdvancedMode() ? null : ref("events_*");
-  const simpleFreshDailyRef = (!helpers.isAdvancedMode() && config.USE_FRESH_DAILY) ? ref("events_fresh_*") : null;
+  console.log(`[BASE_EVENTS] Effective data stream type: ${effectiveDataStreamType}`);
 }
 
 WITH raw_data AS (
-  ${ when(helpers.isAdvancedMode(),
-    `
-    -- Advanced mode: UNION ALL across multiple properties
-    ${rawDataSQL}
-    `,
-    when(useMixedSources && !config.FORCE_FULL_BACKFILL,
-      `
-      -- Mixed sources strategy
-      ${ when(!incremental(),
-        `
-        -- Initial load: Days 1-2 from fresh_daily, Days 3-7 from events_*
-        SELECT * FROM ${simpleFreshDailyRef}
-        WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY))
-                                 AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
-
-        UNION ALL
-
-        SELECT * FROM ${simpleEventsRef}
-        WHERE _TABLE_SUFFIX NOT LIKE 'intraday%'
-          AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL ${config.INITIAL_LOAD_DAYS} DAY))
-                                AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
-        `,
-        `
-        -- Incremental: Days 1-2 from fresh_daily, Day 3 from events_*
-        SELECT * FROM ${simpleFreshDailyRef}
-        WHERE _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY))
-                                 AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
-
-        UNION ALL
-
-        SELECT * FROM ${simpleEventsRef}
-        WHERE _TABLE_SUFFIX NOT LIKE 'intraday%'
-          AND _TABLE_SUFFIX = FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
-        `
-      )}
-      `,
-      `
-      -- Single source strategy
-      SELECT * FROM ${sourceTable}
-      WHERE ${dateFilter}
-        ${ when(!incremental() && !config.FORCE_FULL_BACKFILL, `AND _TABLE_SUFFIX NOT LIKE 'intraday%'`) }
-      `
-    )
-  )}
+  ${rawDataSQL}
 ),
 
 processed_events AS (
-    SELECT 
+    SELECT
         PARSE_DATE('%Y%m%d', event_date) AS event_date,
         event_timestamp,
         event_name,
@@ -261,19 +132,19 @@ processed_events AS (
 
         -- Core Event Parameters (always extracted)
         ${sqlGen.EXTRACT_EVENT_PARAMS('event_params')}
-        
+
         -- Web-specific parameters
         ${ when(effectiveDataStreamType === 'web' || effectiveDataStreamType === 'both',
             `,
         ${sqlGen.EXTRACT_WEB_PARAMS('event_params')}`
         )}
-        
+
         -- App-specific parameters
         ${ when(effectiveDataStreamType === 'app' || effectiveDataStreamType === 'both',
             `,
         ${sqlGen.EXTRACT_APP_PARAMS('event_params')}`
         )}
-        
+
         -- Custom event parameters (always extracted)
         ${ when(config.CUSTOM_PARAMS_ARRAY.length > 0,
             `,
@@ -284,7 +155,7 @@ processed_events AS (
         user_pseudo_id,
         COALESCE(user_id, user_pseudo_id) AS user_id,
         is_active_user,
-        
+
         -- Privacy info as STRUCT
         STRUCT(
             privacy_info.analytics_storage,
@@ -296,13 +167,13 @@ processed_events AS (
         ${sqlGen.EXTRACT_USER_PROPS('user_properties')},
 
         user_first_touch_timestamp,
-        
+
         -- User LTV as STRUCT
         STRUCT(
             user_ltv.revenue,
             user_ltv.currency
         ) AS user_ltv,
-        
+
         -- Device parameters as nested STRUCT
         STRUCT(
             device.category,
@@ -481,31 +352,22 @@ processed_events AS (
     FROM raw_data
 ),
 
-${ when(shouldConsolidate, `
-consolidated_params AS (
-    SELECT
-        *,
-        ${sqlGen.CONSOLIDATE_PARAMS()}
-    FROM processed_events
-),
-`) }
-
 keys_added AS (
     SELECT
         *,
-        
+
         -- Session Key
         CONCAT(
             COALESCE(stream_id, ''), '-',
             COALESCE(CAST(ga_session_id AS STRING), ''), '-',
             COALESCE(user_id, '')
         ) AS session_key,
-        
+
         -- Event Key: globally unique hash
         TO_BASE64(MD5(CONCAT(
             ${sqlGen.GENERATE_EVENT_KEY_CONCAT()}
         ))) AS event_key,
-        
+
         -- Page/App/Screen structs based on data stream type
         ${ when(
           effectiveDataStreamType === 'web',
@@ -514,21 +376,19 @@ keys_added AS (
           page_title,
           page_referrer,
           REGEXP_EXTRACT(page_location, r'://[^/]+(/[^?#]*)') AS page_path,
-          CASE WHEN page_location IS NOT NULL AND page_location != ''
-            THEN TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
-            ELSE NULL
+          CASE WHEN page_location IS NULL OR TRIM(page_location) = '' THEN NULL
+               ELSE TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
           END AS page_key
         ) AS page,
 
         -- Page-session compound key for unique page view calculations
-        CASE WHEN page_location IS NOT NULL AND page_location != ''
-          THEN CONCAT(
-            COALESCE(stream_id, ''), '-',
-            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-            COALESCE(user_id, ''), '-',
-            TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
-          )
-          ELSE NULL
+        CASE WHEN page_location IS NULL OR TRIM(page_location) = '' THEN NULL
+             ELSE CONCAT(
+               COALESCE(stream_id, ''), '-',
+               COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+               COALESCE(user_id, ''), '-',
+               TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
+             )
         END AS page_session_key`
         )}
         ${ when(
@@ -538,60 +398,34 @@ keys_added AS (
           firebase_screen_class,
           firebase_screen_id,
           firebase_previous_screen,
-          CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
-            THEN TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
-            ELSE NULL
+          CASE WHEN (firebase_screen IS NULL OR TRIM(firebase_screen) = '')
+                    AND (firebase_screen_class IS NULL OR TRIM(firebase_screen_class) = '')
+               THEN NULL
+               ELSE TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class), '?')[SAFE_OFFSET(0)]))))
           END AS screen_key
         ) AS app,
 
         -- Screen-session compound key for unique screen view calculations
-        CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
-          THEN CONCAT(
-            COALESCE(stream_id, ''), '-',
-            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-            COALESCE(user_id, ''), '-',
-            TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
-          )
-          ELSE NULL
+        CASE WHEN (firebase_screen IS NULL OR TRIM(firebase_screen) = '')
+                  AND (firebase_screen_class IS NULL OR TRIM(firebase_screen_class) = '')
+             THEN NULL
+             ELSE CONCAT(
+               COALESCE(stream_id, ''), '-',
+               COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+               COALESCE(user_id, ''), '-',
+               TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class), '?')[SAFE_OFFSET(0)]))))
+             )
         END AS screen_session_key`
         )}
         ${ when(
-          effectiveDataStreamType === 'both' && shouldConsolidate,
-          `STRUCT(
-          screen_location,
-          screen_title,
-          screen_referrer,
-          COALESCE(
-            REGEXP_EXTRACT(page_location, r'://[^/]+(/[^?#]*)'),
-            firebase_screen
-          ) AS page_path,
-          CASE WHEN screen_location IS NOT NULL AND screen_location != ''
-            THEN TO_BASE64(MD5(LOWER(TRIM(SPLIT(screen_location, '?')[SAFE_OFFSET(0)]))))
-            ELSE NULL
-          END AS screen_key
-        ) AS page,
-
-        -- Screen-session compound key for unique screen view calculations
-        CASE WHEN screen_location IS NOT NULL AND screen_location != ''
-          THEN CONCAT(
-            COALESCE(stream_id, ''), '-',
-            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-            COALESCE(user_id, ''), '-',
-            TO_BASE64(MD5(LOWER(TRIM(SPLIT(screen_location, '?')[SAFE_OFFSET(0)]))))
-          )
-          ELSE NULL
-        END AS screen_session_key`
-        )}
-        ${ when(
-          effectiveDataStreamType === 'both' && !shouldConsolidate,
+          effectiveDataStreamType === 'both',
           `STRUCT(
           page_location,
           page_title,
           page_referrer,
           REGEXP_EXTRACT(page_location, r'://[^/]+(/[^?#]*)') AS page_path,
-          CASE WHEN page_location IS NOT NULL AND page_location != ''
-            THEN TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
-            ELSE NULL
+          CASE WHEN page_location IS NULL OR TRIM(page_location) = '' THEN NULL
+               ELSE TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
           END AS page_key
         ) AS page,
 
@@ -600,35 +434,36 @@ keys_added AS (
           firebase_screen_class,
           firebase_screen_id,
           firebase_previous_screen,
-          CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
-            THEN TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
-            ELSE NULL
+          CASE WHEN (firebase_screen IS NULL OR TRIM(firebase_screen) = '')
+                    AND (firebase_screen_class IS NULL OR TRIM(firebase_screen_class) = '')
+               THEN NULL
+               ELSE TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class), '?')[SAFE_OFFSET(0)]))))
           END AS screen_key
         ) AS app,
 
         -- Both page-session and screen-session compound keys
-        CASE WHEN page_location IS NOT NULL AND page_location != ''
-          THEN CONCAT(
-            COALESCE(stream_id, ''), '-',
-            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-            COALESCE(user_id, ''), '-',
-            TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
-          )
-          ELSE NULL
+        CASE WHEN page_location IS NULL OR TRIM(page_location) = '' THEN NULL
+             ELSE CONCAT(
+               COALESCE(stream_id, ''), '-',
+               COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+               COALESCE(user_id, ''), '-',
+               TO_BASE64(MD5(LOWER(TRIM(SPLIT(page_location, '?')[SAFE_OFFSET(0)]))))
+             )
         END AS page_session_key,
 
-        CASE WHEN COALESCE(firebase_screen, firebase_screen_class) IS NOT NULL
-          THEN CONCAT(
-            COALESCE(stream_id, ''), '-',
-            COALESCE(CAST(ga_session_id AS STRING), ''), '-',
-            COALESCE(user_id, ''), '-',
-            TO_BASE64(MD5(LOWER(TRIM(COALESCE(firebase_screen, firebase_screen_class)))))
-          )
-          ELSE NULL
+        CASE WHEN (firebase_screen IS NULL OR TRIM(firebase_screen) = '')
+                  AND (firebase_screen_class IS NULL OR TRIM(firebase_screen_class) = '')
+             THEN NULL
+             ELSE CONCAT(
+               COALESCE(stream_id, ''), '-',
+               COALESCE(CAST(ga_session_id AS STRING), ''), '-',
+               COALESCE(user_id, ''), '-',
+               TO_BASE64(MD5(LOWER(TRIM(SPLIT(COALESCE(firebase_screen, firebase_screen_class), '?')[SAFE_OFFSET(0)]))))
+             )
         END AS screen_session_key`
         )}
-        
-    FROM ${ when(shouldConsolidate, 'consolidated_params', 'processed_events') }
+
+    FROM processed_events
 )
 
 SELECT * FROM keys_added
