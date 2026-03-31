@@ -1,11 +1,23 @@
 config {
   type: "table",
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "User identity resolution mapping tracking relationships between user_pseudo_id and user_id",
+  description: "One row per unique user_pseudo_id and user_id pairing observed in the event stream. Tracks when each identity relationship was first and last seen, and how many events and sessions it represents. Clustered by user_pseudo_id and user_id. Used by the users table to resolve cross-device identity.",
   tags: ["daily", "ga4", "users"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
     clusterBy: ["user_pseudo_id", "user_id"]
+  },
+  columns: {
+    user_pseudo_id: "Pseudonymous device or browser identifier assigned by GA4. When a user has no user_pseudo_id (for example, due to consent mode), this field is set to the user_id value to preserve the identity edge.",
+    user_id: "Authenticated user identifier associated with this user_pseudo_id. Null when the user has never signed in.",
+    first_seen_date: "Earliest date this user_pseudo_id and user_id pairing was observed.",
+    last_seen_date: "Most recent date this user_pseudo_id and user_id pairing was observed.",
+    first_seen_timestamp: "Timestamp of the first event recorded for this pairing, in microseconds (UTC).",
+    last_seen_timestamp: "Timestamp of the most recent event recorded for this pairing, in microseconds (UTC).",
+    event_count: "Total number of events recorded for this user_pseudo_id and user_id pair.",
+    session_count: "Number of distinct sessions recorded for this user_pseudo_id and user_id pair.",
+    active_days: "Number of distinct calendar dates on which at least one event was recorded for this pair.",
+    last_updated_timestamp: "Timestamp when this row was last written, in UTC. Refreshed on every full table rebuild."
   }
 }
 

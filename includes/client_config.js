@@ -70,47 +70,47 @@ const USE_CUSTOM_TRAFFIC_SOURCE_LOGIC = false;
  * Supported types: string, int, float, double
  */
 const CORE_PARAMS_ARRAY = [
-    { name: "engagement_time_msec", type: "int" },
-    { name: "engaged_session_event", type: "int" },
-    { name: "entrances", type: "int" },
-    { name: "form_name", type: "string" },
-    { name: "ga_session_id", type: "int" },
-    { name: "ga_session_number", type: "int" },
-    { name: "ignore_referrer", type: "string" },
-    { name: "percent_scrolled", type: "int" },
-    { name: "session_engaged", type: "string" },
-    { name: "video_current_time", type: "int" },
-    { name: "video_duration", type: "int" },
-    { name: "video_percent", type: "int" },
-    { name: "video_provider", type: "string" },
-    { name: "video_title", type: "string" },
-    { name: "video_url", type: "string" }
+    { name: "engagement_time_msec", type: "int" },    // Total active engagement time for this event in milliseconds. INT64.
+    { name: "engaged_session_event", type: "int" },   // Set to 1 when this event occurs during an engaged session. INT64.
+    { name: "entrances", type: "int" },               // Set to 1 for the first event in a session. INT64.
+    { name: "form_name", type: "string" },            // Name of the HTML form submitted with this event. STRING.
+    { name: "ga_session_id", type: "int" },           // Unique session identifier assigned by GA4. Component of session_key. INT64.
+    { name: "ga_session_number", type: "int" },       // Ordinal session count for the user, starting at 1. INT64.
+    { name: "ignore_referrer", type: "string" },      // Set to 'true' when the referrer should be excluded from session attribution logic. STRING.
+    { name: "percent_scrolled", type: "int" },        // How far down the page the user scrolled at the time of the scroll event, as a percentage (0–100). INT64.
+    { name: "session_engaged", type: "string" },      // Set to '1' when the session meets GA4's engagement criteria (10+ seconds, 1+ conversion, or 2+ page views). STRING.
+    { name: "video_current_time", type: "int" },      // Playback position in the video at the time of the video event, in seconds. INT64.
+    { name: "video_duration", type: "int" },          // Total duration of the video, in seconds. INT64.
+    { name: "video_percent", type: "int" },           // Percentage of the video that has been played at the time of the video event (0–100). INT64.
+    { name: "video_provider", type: "string" },       // Provider of the video (for example, YouTube). STRING.
+    { name: "video_title", type: "string" },          // Title of the video. STRING.
+    { name: "video_url", type: "string" }             // URL of the video. STRING.
 ];
 
 /**
  * Web-specific event parameters (extracted when stream_type = 'web')
  */
 const WEB_PARAMS_ARRAY = [
-    { name: "link_classes", type: "string" },
-    { name: "link_text", type: "string" },
-    { name: "link_url", type: "string" },
-    { name: "page_location", type: "string" },
-    { name: "page_referrer", type: "string" },
-    { name: "page_title", type: "string" },
-    { name: "visible", type: "string" }
+    { name: "link_classes", type: "string" },   // CSS class(es) of the link element that triggered a click event. STRING.
+    { name: "link_text", type: "string" },      // Visible text of the link element that triggered a click event. STRING.
+    { name: "link_url", type: "string" },       // Full URL of the link that was clicked. STRING.
+    { name: "page_location", type: "string" },  // Full URL of the page at the time of the event, including path and query string. STRING.
+    { name: "page_referrer", type: "string" },  // URL of the page the user navigated from. STRING.
+    { name: "page_title", type: "string" },     // Title of the page as returned by the browser. STRING.
+    { name: "visible", type: "string" }         // Set to 'true' when the page or element was visible at the time of the event. STRING.
 ];
 
 /**
  * App-specific event parameters (extracted when stream_type = 'app')
  */
 const APP_PARAMS_ARRAY = [
-    { name: "firebase_conversion", type: "int" },
-    { name: "firebase_previous_class", type: "string" },
-    { name: "firebase_previous_id", type: "string" },
-    { name: "firebase_previous_screen", type: "string" },
-    { name: "firebase_screen", type: "string" },
-    { name: "firebase_screen_class", type: "string" },
-    { name: "firebase_screen_id", type: "string" }
+    { name: "firebase_conversion", type: "int" },           // Set to 1 when this event is marked as a Firebase conversion. INT64.
+    { name: "firebase_previous_class", type: "string" },    // Class name of the screen the user navigated from. STRING.
+    { name: "firebase_previous_id", type: "string" },       // Unique identifier of the screen the user navigated from. STRING.
+    { name: "firebase_previous_screen", type: "string" },   // Name of the screen the user navigated from. STRING.
+    { name: "firebase_screen", type: "string" },            // Name of the app screen where the event occurred. STRING.
+    { name: "firebase_screen_class", type: "string" },      // Class name of the app screen where the event occurred. STRING.
+    { name: "firebase_screen_id", type: "string" }          // Unique identifier of the app screen where the event occurred. STRING.
 ];
 
 /**
@@ -118,16 +118,17 @@ const APP_PARAMS_ARRAY = [
  * Add your custom GA4 parameters here
  */
 const CUSTOM_PARAMS_ARRAY = [
+    // Add client-specific event parameters here. Follow the inline comment pattern below.
     // Example:
-    // { name: "custom_param_name", type: "string" },
-    // { name: "custom_param_int", type: "int" },
+    // { name: "custom_param_name", type: "string" },  // Description of what this parameter captures. STRING.
+    // { name: "custom_param_int", type: "int" },      // Description of what this parameter captures. INT64.
 ];
 
 /**
  * Core user properties to extract
  */
 const CORE_USER_PROPS_ARRAY = [
-    { name: "user_type", type: "string" }
+    { name: "user_type", type: "string" }  // Segment or classification of the user as set by the implementation (for example, member, guest, admin). STRING.
 ];
 
 /**

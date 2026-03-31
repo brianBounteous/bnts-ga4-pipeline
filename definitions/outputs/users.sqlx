@@ -1,11 +1,47 @@
 config {
   type: "table",
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "User-level lifetime aggregations with resolved identity",
+  description: "One row per resolved user with lifetime engagement, traffic attribution, and behavioral metrics. Clustered by resolved_user_id. Identity is resolved by joining user_pseudo_id edges from user_identity_map. Ecommerce columns are only present when HAS_ECOMMERCE is enabled in workflow_settings.yaml.",
   tags: ["daily", "ga4", "users", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity", "user_identity_map", "sessions"],
   bigquery: {
     clusterBy: ["resolved_user_id"]
+  },
+  columns: {
+    resolved_user_id: "Canonical identifier for this user. Equals the authenticated user_id when one has been observed for this device, otherwise equals the user_pseudo_id. This is the primary key of the users table.",
+    primary_user_id: "The authenticated user_id most frequently linked to this user_pseudo_id, determined by event count with earliest timestamp as a tiebreaker. Null when the user has never signed in.",
+    user_pseudo_ids: "Array of all distinct user_pseudo_id values linked to this resolved user.",
+    user_pseudo_id_count: "Number of distinct user_pseudo_ids associated with this resolved user.",
+    first_seen_date: "Date of the user's earliest recorded event.",
+    last_seen_date: "Date of the user's most recent recorded event.",
+    days_since_first_seen: "Number of calendar days from first_seen_date to today.",
+    days_since_last_seen: "Number of calendar days from last_seen_date to today. A higher value indicates a less recently active user.",
+    total_sessions: "Lifetime count of distinct sessions for this user.",
+    total_events: "Lifetime count of all events for this user.",
+    total_engagement_time_seconds: "Total active engagement time across all sessions, in seconds.",
+    total_page_views: "Lifetime count of page_view and screen_view events.",
+    active_days: "Number of distinct calendar dates on which the user recorded at least one event.",
+    first_session_source: "Traffic source of the user's first recorded session (first-touch attribution). Joins from the sessions table.",
+    first_session_medium: "Traffic medium of the user's first recorded session.",
+    first_session_campaign: "Campaign name of the user's first recorded session.",
+    first_session_channel_group: "Channel group of the user's first recorded session.",
+    last_non_direct_session_source: "Traffic source from the most recent session where source is not '(direct)' and medium is not '(none)'. Provides a last non-direct attribution view.",
+    last_non_direct_session_medium: "Traffic medium from the most recent non-direct session.",
+    last_non_direct_session_campaign: "Campaign name from the most recent non-direct session.",
+    last_non_direct_session_channel_group: "Channel group from the most recent non-direct session.",
+    device_category_distribution: "Top 10 device categories by session count for this user, as an array of STRUCT(value STRING, session_count INT64). Useful for understanding primary device usage.",
+    platform_distribution: "Top 10 platforms by session count for this user, as an array of STRUCT(value STRING, session_count INT64).",
+    country_distribution: "Top 10 countries by session count for this user, as an array of STRUCT(value STRING, session_count INT64).",
+    metro_distribution: "Top 10 metro areas by session count for this user, as an array of STRUCT(value STRING, session_count INT64).",
+    // FLAG FOR REVIEW: All columns below are populated only when HAS_ECOMMERCE is enabled. They are absent from the schema when ecommerce is disabled.
+    lifetime_revenue_usd: "Total net revenue (purchase minus refund) across all transactions for this user, in USD. Populated only when HAS_ECOMMERCE is enabled. Zero when no transactions exist.",
+    lifetime_revenue: "Total net revenue across all transactions for this user, in the source currency. Populated only when HAS_ECOMMERCE is enabled.",
+    total_transactions: "Lifetime count of distinct transactions for this user. Populated only when HAS_ECOMMERCE is enabled.",
+    first_purchase_date: "Date of the user's first purchase event. Null if the user has no purchases. Populated only when HAS_ECOMMERCE is enabled.",
+    last_purchase_date: "Date of the user's most recent purchase event. Null if the user has no purchases. Populated only when HAS_ECOMMERCE is enabled.",
+    days_to_first_purchase: "Number of days from first_seen_date to first_purchase_date. Measures time from first contact to conversion. Populated only when HAS_ECOMMERCE is enabled.",
+    average_order_value_usd: "Average net revenue per transaction in USD, calculated as lifetime_revenue_usd divided by total_transactions. Populated only when HAS_ECOMMERCE is enabled.",
+    is_converter: "True when the user has lifetime_revenue_usd greater than zero. False otherwise. Populated only when HAS_ECOMMERCE is enabled."
   }
 }
 

@@ -12,11 +12,33 @@ js {
 config {
   type: "table",
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "Page/screen dimension table with current attributes (Type 1 SCD)",
+  description: "One row per unique page or screen, identified by a content hash key. Clustered by screen_type. Stores the most recently observed title, URL, and path for each content item (Type 1 slowly changing dimension — no history is kept). Rebuilt fully on each run. Join to fct_page_views and sessions via the key column.",
   tags: ["daily", "ga4", "pages", "dimensions", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
     clusterBy: ["screen_type"]
+  },
+  columns: {
+    // Web deployments: this column is named page_key.
+    // App deployments: this column is named screen_key.
+    // Mixed web+app deployments: this column is named content_key.
+    page_key: "Base64-encoded MD5 hash of the lowercased, query-stripped page URL. Primary key of this table. In app deployments this column is named screen_key. In mixed web+app deployments it is named content_key.",
+    screen_key: "Base64-encoded MD5 hash of the lowercased screen name. Primary key of this table. In web deployments this column is named page_key. In mixed web+app deployments it is named content_key.",
+    content_key: "Base64-encoded MD5 hash of the lowercased page URL or screen name. Primary key of this table. In web-only deployments this column is named page_key. In app-only deployments it is named screen_key.",
+    // Web deployments: page_location. App: screen_location. Both: content_location.
+    page_location: "Most recently observed full URL for this page, including path and query string. In app deployments this column is named screen_location. In mixed deployments it is named content_location.",
+    screen_location: "Most recently observed screen name for this app screen. In web deployments this column is named page_location. In mixed deployments it is named content_location.",
+    content_location: "Most recently observed URL or screen name for this content item. In web-only deployments this column is named page_location. In app-only deployments it is named screen_location.",
+    // Web deployments: page_title. App: screen_title. Both: content_title.
+    page_title: "Most recently observed page title for this page. In app deployments this column is named screen_title. In mixed deployments it is named content_title.",
+    screen_title: "Most recently observed screen class name for this app screen. In web deployments this column is named page_title. In mixed deployments it is named content_title.",
+    content_title: "Most recently observed page title or screen class name. In web-only deployments this column is named page_title. In app-only deployments it is named screen_title.",
+    page_path: "Most recently observed URL path for this page, stripped of query parameters and hash fragments (for example, /products/shoes). Present in web and mixed deployments only.",
+    page_hostname: "Most recently observed hostname for this page (for example, www.example.com). Present in web and mixed deployments only.",
+    screen_type: "Most frequently observed stream type for this content item. Values are 'web', 'app', or 'unknown'.",
+    first_seen_date: "Earliest date this page or screen was observed in the event data.",
+    last_seen_date: "Most recent date this page or screen was observed in the event data.",
+    last_updated_timestamp: "Timestamp when this row was last written, in UTC. Refreshed on every full table rebuild."
   }
 }
 

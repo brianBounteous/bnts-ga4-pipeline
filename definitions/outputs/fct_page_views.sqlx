@@ -12,12 +12,44 @@ js {
 config {
   type: "table",
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "Page view fact table at page-session grain with engagement metrics",
+  description: "One row per unique page or screen view within a session, aggregated from base_events. Partitioned by event_date and clustered by session_key. The grain is one content item per session (for example, a user visiting the same page twice in a session produces one row). Join to sessions via session_key and to dim_pages via the key column.",
   tags: ["daily", "ga4", "pages", "facts", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
     partitionBy: "event_date",
     clusterBy: ["session_key"]
+  },
+  columns: {
+    // Key column names vary by stream type.
+    // Web deployments: page_session_key. App: screen_session_key. Both: content_session_key.
+    page_session_key: "Primary key of this table. Compound surrogate key built from stream_id, ga_session_id, user_id, and the page hash key, separated by hyphens. Uniquely identifies one page within one session. In app deployments this column is named screen_session_key. In mixed deployments it is named content_session_key.",
+    screen_session_key: "Primary key of this table. Compound surrogate key built from stream_id, ga_session_id, user_id, and the screen hash key, separated by hyphens. Uniquely identifies one screen within one session. In web deployments this column is named page_session_key. In mixed deployments it is named content_session_key.",
+    content_session_key: "Primary key of this table. Compound surrogate key built from stream_id, ga_session_id, user_id, and the content hash key, separated by hyphens. In web-only deployments this column is named page_session_key. In app-only deployments it is named screen_session_key.",
+    // Web: page_key. App: screen_key. Both: content_key.
+    page_key: "Hash key of the page viewed in this row. Base64-encoded MD5 of the lowercased, query-stripped URL. Joins to dim_pages. In app deployments this column is named screen_key. In mixed deployments it is named content_key.",
+    screen_key: "Hash key of the app screen viewed in this row. Base64-encoded MD5 of the lowercased screen name. Joins to dim_pages. In web deployments this column is named page_key. In mixed deployments it is named content_key.",
+    content_key: "Hash key of the page or screen viewed in this row. In web-only deployments this column is named page_key. In app-only deployments it is named screen_key.",
+    session_key: "Compound surrogate key for the parent session. Joins to the sessions table.",
+    user_id: "Resolved user identifier. Joins to the users table.",
+    user_pseudo_id: "Pseudonymous device or browser identifier assigned by GA4.",
+    event_date: "Date of the first page_view or screen_view event for this content item within this session.",
+    // Web: page_location. App: screen_location. Both: content_location.
+    page_location: "Full URL of the page, including path and query string. In app deployments this column is named screen_location. In mixed deployments it is named content_location.",
+    screen_location: "Name of the app screen. In web deployments this column is named page_location. In mixed deployments it is named content_location.",
+    content_location: "Full URL or screen name for this content item. In web-only deployments this column is named page_location. In app-only deployments it is named screen_location.",
+    page_path: "URL path component of the page, stripped of query parameters and hash fragments. Present in web and mixed deployments only.",
+    // Web: page_title. App: screen_title. Both: content_title.
+    page_title: "Title of the page as returned by the browser. In app deployments this column is named screen_title. In mixed deployments it is named content_title.",
+    screen_title: "Screen class name for this app screen. In web deployments this column is named page_title. In mixed deployments it is named content_title.",
+    content_title: "Page title or screen class name for this content item. In web-only deployments this column is named page_title. In app-only deployments it is named screen_title.",
+    page_view_number: "Ordinal position of this page or screen view within the session, ordered by event_timestamp. A value of 1 means this was the first view in the session.",
+    total_engagement_time_msec: "Total active engagement time accumulated on this page or screen within this session, in milliseconds.",
+    total_engagement_time_seconds: "Total active engagement time on this page or screen within this session, in seconds, rounded to two decimal places.",
+    max_scroll_depth: "Maximum percent_scrolled value recorded for this page during this session. Ranges from 0 to 100. Populated for web events only.",
+    page_view_event_count: "Number of page_view or screen_view events recorded for this content item within this session. Greater than 1 when a user revisited the same page during the session.",
+    screen_type: "Normalized stream type for this row. Values are 'web', 'app', or 'unknown'.",
+    is_entry_page: "True when this page or screen is the first viewed in the session (landing page). False otherwise.",
+    is_exit_page: "True when this page or screen is the last viewed in the session. False otherwise."
   }
 }
 
