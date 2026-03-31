@@ -2,12 +2,37 @@ config {
   type: "table",
   disabled: !dataform.projectConfig.vars.HAS_ECOMMERCE,
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "Transaction-level ecommerce data (purchase and refund events)",
+  description: "One row per purchase or refund event with transaction-level ecommerce totals. Partitioned by event_date and clustered by user_id. Only populated when HAS_ECOMMERCE is enabled in workflow_settings.yaml. Join to sessions via session_key, to fct_page_views via page_session_key, and to ecommerce_items via transaction_id for item-level detail.",
   tags: ["daily", "ga4", "ecommerce", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
     partitionBy: "event_date",
     clusterBy: ["user_id"]
+  },
+  columns: {
+    transaction_id: "Ecommerce transaction identifier as provided by the implementation. Used to join to ecommerce_items for item-level detail.",
+    event_key: "Globally unique identifier for the source event, computed as a Base64-encoded MD5 hash of all event field values. Joins back to base_events.",
+    user_id: "Resolved user identifier. Joins to sessions and users.",
+    session_key: "Compound surrogate key for the session, built from stream_id, ga_session_id, and user_id. Joins to the sessions table.",
+    page_session_key: "Compound surrogate key identifying the page or screen view at the time of the transaction. Joins to fct_page_views. The column name may be page_session_key, screen_session_key, or content_session_key depending on deployment stream type.",
+    event_date: "Date the transaction event was recorded.",
+    event_timestamp: "Timestamp of the transaction event in microseconds (UTC).",
+    event_name: "GA4 event name for this transaction. Typically 'purchase' or 'refund', as configured in TRANSACTION_EVENTS.",
+    purchase_revenue: "Total purchase revenue for this transaction in the source currency.",
+    purchase_revenue_in_usd: "Total purchase revenue for this transaction converted to USD.",
+    refund_value: "Total refund amount for this transaction in the source currency.",
+    refund_value_in_usd: "Total refund amount for this transaction converted to USD.",
+    shipping_value: "Shipping cost associated with this transaction in the source currency.",
+    shipping_value_in_usd: "Shipping cost associated with this transaction converted to USD.",
+    tax_value: "Tax amount associated with this transaction in the source currency.",
+    tax_value_in_usd: "Tax amount associated with this transaction converted to USD.",
+    total_item_quantity: "Total quantity of all items included in this transaction.",
+    unique_items: "Count of distinct items included in this transaction.",
+    net_revenue: "Purchase revenue minus refund value in the source currency. Equals purchase_revenue - refund_value.",
+    net_revenue_in_usd: "Purchase revenue minus refund value in USD. Equals purchase_revenue_in_usd - refund_value_in_usd.",
+    item_ids: "Array of item_id values for all items included in this transaction. Use to cross-reference ecommerce_items.",
+    item_count: "Number of item_id values in the item_ids array.",
+    is_refund: "True when the event_name is 'refund'. False for purchase events."
   }
 }
 

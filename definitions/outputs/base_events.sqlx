@@ -1,12 +1,261 @@
 config {
   type: "incremental",
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "Events records with 3-day rolling refresh to capture late arrivals",
+  description: "One row per GA4 event hit, sourced from the raw BigQuery export. Partitioned by event_date and clustered by event_name and session_key. Refreshed incrementally with a 3-day rolling window to capture late-arriving events. This is the foundation table from which all other staging tables are built — sessions, users, fct_page_views, transactions, and ecommerce_items all read from base_events.",
   tags: ["daily", "ga4", "core"],
   dependencies: ["base_events_preops"],
   bigquery: {
     partitionBy: "event_date",
     clusterBy: ["event_name", "session_key"],
+  },
+  columns: {
+    event_date: "Date the event was recorded, in the timezone configured for the GA4 property.",
+    event_timestamp: "Timestamp of the event in microseconds (UTC). Divide by 1,000,000 to convert to seconds.",
+    event_name: "Name of the GA4 event (for example, page_view, scroll, purchase). Determines the type of user interaction recorded in this row.",
+    event_previous_timestamp: "Timestamp of the preceding event for this user in microseconds (UTC). Null for the first event in a session.",
+    event_bundle_sequence_id: "Sequential identifier for the upload bundle in which this event was sent.",
+    event_server_timestamp_offset: "Difference in microseconds between the timestamp recorded on the device and the timestamp recorded by GA4 servers.",
+    batch_event_index: "Position of this event within its upload batch, starting at 0.",
+    batch_page_id: "Page context identifier within an upload batch. Changes when the user navigates to a new page during the same batch.",
+    event_value_in_usd: "Monetary value associated with the event, converted to USD at the time of the event.",
+    user_pseudo_id: "Pseudonymous identifier assigned by GA4 to a device or browser. Not stable across devices or after cookie resets. For cross-device reporting, use user_id or resolved_user_id in the users table.",
+    user_id: "Resolved user identifier. Equals the authenticated user_id when available, otherwise equals user_pseudo_id. This is the consistent join key used across all staging tables.",
+    is_active_user: "True when GA4 classified the user as active at the time of this event. False otherwise.",
+    privacy_info: {
+      description: "Consent and privacy signals recorded at the time of the event.",
+      columns: {
+        analytics_storage: "Consent status for analytics storage. Values are 'Yes', 'No', or null.",
+        ads_storage: "Consent status for ads storage. Values are 'Yes', 'No', or null.",
+        uses_transient_token: "True when a transient token was used in place of a persistent identifier due to consent restrictions."
+      }
+    },
+    user_first_touch_timestamp: "Timestamp of the very first event ever recorded for this user, in microseconds (UTC).",
+    user_ltv: {
+      description: "Lifetime value metrics as tracked natively by GA4.",
+      columns: {
+        revenue: "Lifetime revenue attributed to this user in the source currency, as reported by GA4.",
+        currency: "Currency code for the lifetime revenue value (for example, USD, EUR)."
+      }
+    },
+    device: {
+      description: "Device and browser attributes recorded at the time of the event.",
+      columns: {
+        category: "Device category: desktop, mobile, or tablet.",
+        mobile_brand_name: "Brand name of the mobile device (for example, Apple, Samsung).",
+        mobile_model_name: "Model name of the mobile device (for example, iPhone 14).",
+        mobile_marketing_name: "Marketing name of the mobile device as provided by the manufacturer.",
+        mobile_os_hardware_model: "Hardware model string from the operating system.",
+        operating_system: "Operating system of the device (for example, iOS, Android, Windows).",
+        operating_system_version: "Version number of the operating system.",
+        vendor_id: "Vendor identifier on iOS devices (IDFV). Null on other platforms.",
+        advertising_id: "Advertising identifier (IDFA on iOS, GAID on Android). May be null due to user privacy settings.",
+        language: "Language and locale setting of the device (for example, en-us).",
+        is_limited_ad_tracking: "True when the user has enabled limited ad tracking on their device.",
+        time_zone_offset_seconds: "Device time zone offset from UTC in seconds.",
+        browser: "Browser name (for example, Chrome, Safari). Populated for web events.",
+        browser_version: "Browser version string. Populated for web events.",
+        web_info: {
+          description: "Additional web-specific browser and hostname details.",
+          columns: {
+            browser: "Browser name as reported in the web_info field.",
+            browser_version: "Browser version as reported in the web_info field.",
+            hostname: "Hostname of the page URL at the time of the event (for example, www.example.com)."
+          }
+        }
+      }
+    },
+    geo: {
+      description: "Geographic location of the user, estimated from IP address at the time of the event.",
+      columns: {
+        continent: "Continent (for example, Americas, Europe).",
+        country: "Country (for example, United States).",
+        region: "Region or state (for example, California).",
+        city: "City (for example, San Francisco).",
+        sub_continent: "Sub-continental region (for example, Northern America).",
+        metro: "Metropolitan area (for example, San Francisco-Oakland-San Jose CA)."
+      }
+    },
+    app_info: {
+      description: "Mobile app metadata. Populated for app events only; null for web events.",
+      columns: {
+        id: "App package name or bundle ID (for example, com.example.myapp).",
+        version: "App version string (for example, 2.4.1).",
+        install_store: "App store from which the app was installed (for example, Apple App Store, Google Play Store).",
+        firebase_app_id: "Firebase application identifier.",
+        install_source: "Source credited with the app installation."
+      }
+    },
+    first_user_traffic_source: {
+      description: "Traffic source credited with the user's first visit (first-touch attribution). For most reporting use cases, use the flattened traffic source columns in the sessions table instead of querying this struct directly.",
+      columns: {
+        source: "Traffic source of the user's first visit (for example, google, facebook.com). Null values are replaced with '(not set)'.",
+        medium: "Traffic medium of the user's first visit (for example, organic, cpc). Null values are replaced with '(not set)'.",
+        campaign: "Campaign name of the user's first visit. Null values are replaced with '(not set)'."
+      }
+    },
+    collected_traffic_source: {
+      description: "Manual UTM parameters and click identifiers collected at the time of the event. For most reporting use cases, use the flattened traffic source columns in the sessions table instead of querying this struct directly.",
+      columns: {
+        manual_campaign_id: "Value of the utm_id parameter. Null values are replaced with '(not set)'.",
+        manual_campaign_name: "Value of the utm_campaign parameter. Null values are replaced with '(not set)'.",
+        manual_source: "Value of the utm_source parameter. Null values are replaced with '(not set)'.",
+        manual_medium: "Value of the utm_medium parameter. Null values are replaced with '(not set)'.",
+        manual_term: "Value of the utm_term parameter (paid search keyword). Null values are replaced with '(not set)'.",
+        manual_content: "Value of the utm_content parameter. Null values are replaced with '(not set)'.",
+        manual_source_platform: "Value of the utm_source_platform parameter. Null values are replaced with '(not set)'.",
+        manual_creative_format: "Value of the utm_creative_format parameter. Null values are replaced with '(not set)'.",
+        manual_marketing_tactic: "Value of the utm_marketing_tactic parameter. Null values are replaced with '(not set)'.",
+        gclid: "Google Click Identifier from Google Ads. Null values are replaced with '(not set)'.",
+        dclid: "DoubleClick Click Identifier from Display & Video 360. Null values are replaced with '(not set)'.",
+        srsltid: "Google Merchant Center click identifier. Null values are replaced with '(not set)'."
+      }
+    },
+    stream_id: "Identifier of the GA4 data stream that captured this event. Used as a component of session_key, event_key, and page_session_key.",
+    platform: "Platform as reported by GA4: WEB, IOS, or ANDROID.",
+    screen_type: "Normalized platform classification derived from the platform field. Values are 'web' (WEB), 'app' (IOS or ANDROID), or 'unknown'.",
+    ecommerce: {
+      description: "Transaction-level ecommerce totals recorded with this event. Populated for ecommerce events such as purchase and refund. For item-level detail, use the ecommerce_items table.",
+      columns: {
+        total_item_quantity: "Total quantity of all items included in the event.",
+        purchase_revenue_in_usd: "Purchase revenue for this event converted to USD.",
+        purchase_revenue: "Purchase revenue for this event in the source currency.",
+        refund_value_in_usd: "Refund value for this event converted to USD.",
+        refund_value: "Refund value for this event in the source currency.",
+        shipping_value_in_usd: "Shipping cost for this event converted to USD.",
+        shipping_value: "Shipping cost for this event in the source currency.",
+        tax_value_in_usd: "Tax amount for this event converted to USD.",
+        tax_value: "Tax amount for this event in the source currency.",
+        unique_items: "Count of distinct items included in the event.",
+        transaction_id: "Transaction identifier associated with this ecommerce event."
+      }
+    },
+    session_traffic_source_last_click: {
+      description: "Last-click session-level traffic source attribution from GA4, broken down by attribution model and ad platform. For most reporting use cases, use the flattened session_source, session_medium, and session_channel_group columns in the sessions table instead of querying this struct directly.",
+      columns: {
+        manual_campaign: {
+          description: "UTM parameter-based last-click attribution for this session.",
+          columns: {
+            campaign_id: "Campaign ID from utm_id. Null values are replaced with '(not set)'.",
+            campaign_name: "Campaign name from utm_campaign. Null values are replaced with '(not set)'.",
+            source: "Traffic source from utm_source. Null values are replaced with '(not set)'.",
+            medium: "Traffic medium from utm_medium. Null values are replaced with '(not set)'.",
+            term: "Search term from utm_term. Null values are replaced with '(not set)'.",
+            content: "Ad content identifier from utm_content. Null values are replaced with '(not set)'.",
+            source_platform: "Source platform from utm_source_platform. Null values are replaced with '(not set)'.",
+            creative_format: "Creative format from utm_creative_format. Null values are replaced with '(not set)'.",
+            marketing_tactic: "Marketing tactic from utm_marketing_tactic. Null values are replaced with '(not set)'."
+          }
+        },
+        google_ads_campaign: {
+          description: "Google Ads last-click attribution for this session.",
+          columns: {
+            customer_id: "Google Ads customer account ID. Null values are replaced with '(not set)'.",
+            account_name: "Google Ads account name. Null values are replaced with '(not set)'.",
+            campaign_id: "Google Ads campaign ID. Null values are replaced with '(not set)'.",
+            campaign_name: "Google Ads campaign name. Null values are replaced with '(not set)'.",
+            ad_group_id: "Google Ads ad group ID. Null values are replaced with '(not set)'.",
+            ad_group_name: "Google Ads ad group name. Null values are replaced with '(not set)'."
+          }
+        },
+        cross_channel_campaign: {
+          description: "GA4 default cross-channel last-click attribution. This is the recommended source for session_source, session_medium, and session_channel_group used in the sessions table.",
+          columns: {
+            campaign_id: "Campaign ID under cross-channel attribution. Null values are replaced with '(not set)'.",
+            campaign_name: "Campaign name under cross-channel attribution. Null values are replaced with '(not set)'.",
+            source: "Traffic source under cross-channel attribution (for example, google, facebook.com). Null values are replaced with '(not set)'.",
+            medium: "Traffic medium under cross-channel attribution (for example, organic, cpc). Null values are replaced with '(not set)'.",
+            source_platform: "Source platform under cross-channel attribution. Null values are replaced with '(not set)'.",
+            default_channel_group: "GA4 default channel grouping (for example, Organic Search, Paid Social, Direct). Null values are replaced with '(not set)'.",
+            primary_channel_group: "GA4 primary channel grouping. Null values are replaced with '(not set)'."
+          }
+        },
+        sa360_campaign: {
+          description: "Search Ads 360 last-click attribution for this session.",
+          columns: {
+            source: "Traffic source from SA360. Null values are replaced with '(not set)'.",
+            medium: "Traffic medium from SA360. Null values are replaced with '(not set)'.",
+            campaign_id: "SA360 campaign ID. Null values are replaced with '(not set)'.",
+            campaign_name: "SA360 campaign name. Null values are replaced with '(not set)'.",
+            ad_group_id: "SA360 ad group ID. Null values are replaced with '(not set)'.",
+            ad_group_name: "SA360 ad group name. Null values are replaced with '(not set)'.",
+            creative_format: "Creative format from SA360. Null values are replaced with '(not set)'.",
+            engine_account_name: "SA360 engine account name. Null values are replaced with '(not set)'.",
+            engine_account_type: "SA360 engine account type (for example, Google Ads, Microsoft Advertising). Null values are replaced with '(not set)'.",
+            manager_account_name: "SA360 manager account name. Null values are replaced with '(not set)'."
+          }
+        },
+        cm360_campaign: {
+          description: "Campaign Manager 360 last-click attribution for this session.",
+          columns: {
+            source: "Traffic source from CM360. Null values are replaced with '(not set)'.",
+            medium: "Traffic medium from CM360. Null values are replaced with '(not set)'.",
+            campaign_id: "CM360 campaign ID. Null values are replaced with '(not set)'.",
+            campaign_name: "CM360 campaign name. Null values are replaced with '(not set)'.",
+            account_id: "CM360 account ID. Null values are replaced with '(not set)'.",
+            account_name: "CM360 account name. Null values are replaced with '(not set)'.",
+            advertiser_id: "CM360 advertiser ID. Null values are replaced with '(not set)'.",
+            advertiser_name: "CM360 advertiser name. Null values are replaced with '(not set)'.",
+            creative_id: "CM360 creative ID. Null values are replaced with '(not set)'.",
+            creative_format: "CM360 creative format. Null values are replaced with '(not set)'.",
+            creative_name: "CM360 creative name. Null values are replaced with '(not set)'.",
+            creative_type: "CM360 creative type. Null values are replaced with '(not set)'.",
+            creative_type_id: "CM360 creative type identifier. Null values are replaced with '(not set)'.",
+            creative_version: "CM360 creative version. Null values are replaced with '(not set)'.",
+            placement_id: "CM360 placement ID. Null values are replaced with '(not set)'.",
+            placement_cost_structure: "CM360 placement cost structure (for example, CPM, CPC). Null values are replaced with '(not set)'.",
+            placement_name: "CM360 placement name. Null values are replaced with '(not set)'.",
+            rendering_id: "CM360 rendering ID. Null values are replaced with '(not set)'."
+          }
+        },
+        dv360_campaign: {
+          description: "Display & Video 360 last-click attribution for this session.",
+          columns: {
+            partner_id: "DV360 partner ID. Null values are replaced with '(not set)'.",
+            partner_name: "DV360 partner name. Null values are replaced with '(not set)'.",
+            source: "Traffic source from DV360. Null values are replaced with '(not set)'.",
+            medium: "Traffic medium from DV360. Null values are replaced with '(not set)'.",
+            campaign_id: "DV360 campaign ID. Null values are replaced with '(not set)'.",
+            campaign_name: "DV360 campaign name. Null values are replaced with '(not set)'.",
+            exchange_id: "DV360 exchange ID. Null values are replaced with '(not set)'.",
+            exchange_name: "DV360 exchange name. Null values are replaced with '(not set)'.",
+            advertiser_id: "DV360 advertiser ID. Null values are replaced with '(not set)'.",
+            advertiser_name: "DV360 advertiser name. Null values are replaced with '(not set)'.",
+            creative_id: "DV360 creative ID. Null values are replaced with '(not set)'.",
+            creative_format: "DV360 creative format. Null values are replaced with '(not set)'.",
+            creative_name: "DV360 creative name. Null values are replaced with '(not set)'.",
+            insertion_order_id: "DV360 insertion order ID. Null values are replaced with '(not set)'.",
+            insertion_order_name: "DV360 insertion order name. Null values are replaced with '(not set)'.",
+            line_item_id: "DV360 line item ID. Null values are replaced with '(not set)'.",
+            line_item_name: "DV360 line item name. Null values are replaced with '(not set)'."
+          }
+        }
+      }
+    },
+    items: "Array of item-level ecommerce data included in the event. Each element is a STRUCT containing product attributes (item_id, item_name, brand, variant, categories 1–5), pricing (price, price_in_usd), and event-specific values (quantity, item_revenue, item_refund). For analysis-ready item rows, use the ecommerce_items table instead.",
+    session_key: "Compound surrogate key for the session, built by concatenating stream_id, ga_session_id, and user_id separated by hyphens. Use this to join base_events to the sessions table.",
+    event_key: "Globally unique identifier for this event, computed as a Base64-encoded MD5 hash of all event field values concatenated. Use this to deduplicate events or join to the transactions and ecommerce_items tables.",
+    page: {
+      description: "Web page context for this event. Populated in web and mixed (web+app) deployments only. Use the app struct for app-only deployments.",
+      columns: {
+        page_location: "Full URL of the page at the time of the event, including path and query string.",
+        page_title: "Title of the page as returned by the browser.",
+        page_referrer: "URL of the page the user navigated from.",
+        page_path: "URL path component, stripped of query parameters and hash fragments (for example, /products/shoes).",
+        page_key: "Base64-encoded MD5 hash of the lowercased, query-stripped page URL. Stable identifier for a page. Joins to dim_pages and fct_page_views. In app-only deployments this field is in the app struct and named screen_key."
+      }
+    },
+    page_session_key: "Compound surrogate key identifying a unique page view within a session, built from stream_id, ga_session_id, user_id, and page_key separated by hyphens. Joins to fct_page_views. Present in web and mixed deployments. In app-only deployments this column is named screen_session_key.",
+    app: {
+      description: "App screen context for this event. Populated in app and mixed (web+app) deployments only. Use the page struct for web-only deployments.",
+      columns: {
+        firebase_screen: "Name of the app screen where the event occurred.",
+        firebase_screen_class: "Class name of the screen in the app's codebase.",
+        firebase_screen_id: "Unique screen identifier assigned by Firebase.",
+        firebase_previous_screen: "Name of the screen the user navigated from.",
+        screen_key: "Base64-encoded MD5 hash of the lowercased screen name (or screen class if screen name is null). Stable identifier for a screen. Joins to dim_pages and fct_page_views. In web-only deployments this field is in the page struct and named page_key."
+      }
+    },
+    screen_session_key: "Compound surrogate key identifying a unique screen view within a session, built from stream_id, ga_session_id, user_id, and screen_key separated by hyphens. Joins to fct_page_views. Present in app and mixed deployments. In web-only deployments this column is named page_session_key."
   }
 }
 
