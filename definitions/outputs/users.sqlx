@@ -19,7 +19,7 @@ config {
     total_sessions: "Lifetime count of distinct sessions for this user.",
     total_events: "Lifetime count of all events for this user.",
     total_engagement_time_seconds: "Total active engagement time across all sessions, in seconds.",
-    total_page_views: "Lifetime count of page_view and screen_view events.",
+    total_screen_views: "Lifetime count of page_view and screen_view events.",
     active_days: "Number of distinct calendar dates on which the user recorded at least one event.",
     first_session_source: "Traffic source of the user's first recorded session (first-touch attribution). Joins from the sessions table.",
     first_session_medium: "Traffic medium of the user's first recorded session.",
@@ -137,7 +137,7 @@ user_metrics AS (
     COUNT(DISTINCT session_key) AS total_sessions,
     COUNT(*) AS total_events,
     SUM(COALESCE(engagement_time_msec, 0)) / 1000 AS total_engagement_time_seconds,
-    COUNTIF(event_name IN ('page_view', 'screen_view')) AS total_page_views,
+    COUNTIF(event_name IN ('page_view', 'screen_view')) AS total_screen_views,
     COUNT(DISTINCT event_date) AS active_days
     
   FROM events_resolved
@@ -272,7 +272,7 @@ SELECT
   um.total_sessions,
   um.total_events,
   um.total_engagement_time_seconds,
-  um.total_page_views,
+  um.total_screen_views,
   um.active_days,
   
   -- First traffic attribution
