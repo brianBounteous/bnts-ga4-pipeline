@@ -45,7 +45,7 @@ config {
     total_engagement_time_msec: "Sum of engagement_time_msec across all events in the session, in milliseconds.",
     total_engagement_time_seconds: "Total engagement time for the session in seconds, rounded to two decimal places.",
     unique_screens_viewed: "Count of distinct pages or screens viewed in the session, identified by their hash key.",
-    page_view_count: "Count of page_view or screen_view events in the session.",
+    total_screen_views: "Count of total page_view and screen_view events across the session.",
     is_engaged_session: "True when at least one event in the session has session_engaged equal to '1', indicating the session meets GA4's engagement criteria. False otherwise."
   }
 }
@@ -165,7 +165,7 @@ session_aggregated AS (
     COUNT(*) AS event_count,
     SUM(COALESCE(engagement_time_msec, 0)) AS total_engagement_time_msec,
     COUNT(DISTINCT screen_key) AS unique_screens_viewed,
-    COUNTIF(event_name = 'page_view') AS page_view_count,
+    COUNTIF(event_name = 'page_view') AS total_screen_views,
     
     -- Stream type (from first event in session)
     ARRAY_AGG(screen_type ORDER BY event_timestamp LIMIT 1)[SAFE_OFFSET(0)] AS screen_type,
@@ -234,7 +234,7 @@ SELECT
   total_engagement_time_msec,
   ROUND(total_engagement_time_msec / 1000, 2) AS total_engagement_time_seconds,
   unique_screens_viewed,
-  page_view_count,
+  total_screen_views,
   
   -- Flags
   is_engaged_session
