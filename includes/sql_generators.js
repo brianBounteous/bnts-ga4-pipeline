@@ -118,9 +118,9 @@ function GENERATE_EVENT_KEY_CONCAT() {
  * Generates SQL for extracting user properties
  */
 function EXTRACT_USER_PROPS(sourceArray = 'user_properties') {
-  if (config.CORE_USER_PROPS_ARRAY.length === 0) return '';
+  if (config.CUSTOM_USER_PROPS_ARRAY.length === 0) return '';
 
-  return config.CORE_USER_PROPS_ARRAY.map(prop => {
+  return config.CUSTOM_USER_PROPS_ARRAY.map(prop => {
     let valueField;
 
     switch(prop.type.toLowerCase()) {
