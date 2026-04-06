@@ -125,9 +125,9 @@ const CUSTOM_PARAMS_ARRAY = [
 ];
 
 /**
- * Core user properties to extract
+ * Custom user properties to extract
  */
-const CORE_USER_PROPS_ARRAY = [
+const CUSTOM_USER_PROPS_ARRAY = [
     { name: "user_type", type: "string" }  // Segment or classification of the user as set by the implementation (for example, member, guest, admin). STRING.
 ];
 
@@ -179,7 +179,7 @@ const clientConfig = {
     WEB_PARAMS_ARRAY,
     APP_PARAMS_ARRAY,
     CUSTOM_PARAMS_ARRAY,
-    CORE_USER_PROPS_ARRAY,
+    CUSTOM_USER_PROPS_ARRAY,
     CUSTOM_ITEMS_PARAMS,
 
     // Ecommerce Event Config
