@@ -12,7 +12,7 @@ js {
 config {
   type: "table",
   schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "One row per unique page or screen view within a session, aggregated from base_events. Partitioned by event_date and clustered by session_key. The grain is one content item per session (for example, a user visiting the same page twice in a session produces one row). Join to sessions via session_key and to dim_pages via the key column.",
+  description: "One row per unique page or screen view within a session, aggregated from base_events. Partitioned by event_date and clustered by session_key. The grain is one content item per session (for example, a user visiting the same page twice in a session produces one row). Join to sessions via session_key and to dim_pages via the key column for page attributes such as location, path, and title.",
   tags: ["daily", "ga4", "pages", "facts", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {
@@ -33,15 +33,6 @@ config {
     user_id: "Resolved user identifier. Joins to the users table.",
     user_pseudo_id: "Pseudonymous device or browser identifier assigned by GA4.",
     event_date: "Date of the first page_view or screen_view event for this content item within this session.",
-    // Web: page_location. App: screen_location. Both: content_location.
-    page_location: "Full URL of the page, including path and query string. In app deployments this column is named screen_location. In mixed deployments it is named content_location.",
-    screen_location: "Name of the app screen. In web deployments this column is named page_location. In mixed deployments it is named content_location.",
-    content_location: "Full URL or screen name for this content item. In web-only deployments this column is named page_location. In app-only deployments it is named screen_location.",
-    page_path: "URL path component of the page, stripped of query parameters and hash fragments. Present in web and mixed deployments only.",
-    // Web: page_title. App: screen_title. Both: content_title.
-    page_title: "Title of the page as returned by the browser. In app deployments this column is named screen_title. In mixed deployments it is named content_title.",
-    screen_title: "Screen class name for this app screen. In web deployments this column is named page_title. In mixed deployments it is named content_title.",
-    content_title: "Page title or screen class name for this content item. In web-only deployments this column is named page_title. In app-only deployments it is named screen_title.",
     page_view_number: "Ordinal position of this page or screen view within the session, ordered by event_timestamp. A value of 1 means this was the first view in the session.",
     total_engagement_time_msec: "Total active engagement time accumulated on this page or screen within this session, in milliseconds.",
     total_engagement_time_seconds: "Total active engagement time on this page or screen within this session, in seconds, rounded to two decimal places.",
@@ -66,11 +57,6 @@ WITH page_view_events AS (
     -- Dates & timestamps
     event_date,
     event_timestamp,
-
-    -- Page/screen attributes (for convenience, though available via FK)
-    ${screenFields.location} AS ${outputCols.location},
-    ${ when(outputCols.path !== null, `${screenFields.path} AS ${outputCols.path},`) }
-    ${screenFields.title} AS ${outputCols.title},
 
     -- Engagement metrics
     engagement_time_msec,
@@ -128,11 +114,6 @@ page_session_aggregated AS (
     -- Use the first occurrence date for this page-session
     MIN(pv.event_date) AS event_date,
 
-    -- Page/screen attributes (use first values)
-    ANY_VALUE(pv.${outputCols.location}) AS ${outputCols.location},
-    ${ when(outputCols.path !== null, `ANY_VALUE(pv.${outputCols.path}) AS ${outputCols.path},`) }
-    ANY_VALUE(pv.${outputCols.title}) AS ${outputCols.title},
-
     -- Sequence
     MIN(pv.page_view_number) AS page_view_number,
 
@@ -168,11 +149,6 @@ SELECT
 
   -- Date (for partitioning)
   event_date,
-
-  -- Page/screen attributes (denormalized for convenience)
-  ${outputCols.location},
-  ${ when(outputCols.path !== null, `${outputCols.path},`) }
-  ${outputCols.title},
 
   -- Sequence
   page_view_number,
