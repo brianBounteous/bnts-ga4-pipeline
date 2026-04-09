@@ -1,0 +1,243 @@
+config {
+  type: "table",
+  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  description: "One row per session_key + conversion_name. Partitioned by session_date and clustered by session_key and conversion_name. Every session appears once per conversion type defined in CONVERSIONS_CONFIG, regardless of whether it converted. Use is_conversion to filter to converting sessions and conversion_event_count for intensity. Join to sessions via session_key.",
+  tags: ["daily", "ga4", "conversions", "reporting"],
+  dependencies: ["sessions", "base_events"],
+  bigquery: {
+    partitionBy: "session_date",
+    clusterBy: ["session_key", "conversion_name"]
+  },
+  columns: {
+    session_key: "Compound surrogate key for the session. Foreign key to the sessions table. Joins to base_events, sessions, and transactions.",
+    session_date: "Date the session started. Sourced from the sessions table. Used as the partition column.",
+    conversion_name: "Name of the conversion type as defined in CONVERSIONS_CONFIG. One row per session_key + conversion_name combination.",
+    is_conversion: "True when at least one event in the session satisfied all filter conditions for this conversion type. False otherwise.",
+    session_conversion_key: "Surrogate key for this session + conversion combination, computed as TO_BASE64(MD5(CONCAT(session_key, '|', conversion_name))). Globally unique identifier for this row.",
+    conversion_event_count: "Count of events in this session that satisfied all filter conditions for this conversion type. Zero when is_conversion is false."
+  }
+}
+
+js {
+  const { clientConfig } = require('includes/client_config.js');
+  const CONVERSIONS_CONFIG = clientConfig.CONVERSIONS_CONFIG || [];
+
+  // ============================================================================
+  // FIELD MAP
+  // Maps CONVERSIONS_CONFIG filter condition keys to SQL expressions in base_events.
+  //
+  // Notes:
+  //   - page_location is a flat column in base_events (extracted from event_params
+  //     via WEB_PARAMS_ARRAY). Use directly without struct prefix.
+  //   - page_path is generated inside the page STRUCT in base_events (not flat).
+  //     Must be referenced as page.page_path.
+  //   - page_path_clean is a flat column when included in CUSTOM_PARAMS_ARRAY.
+  //   - item_ keys require CROSS JOIN UNNEST(items) AS item; detected automatically.
+  //   - session_source, session_medium, session_channel_group require a join to the
+  //     sessions table and are not yet supported in the SQL generator. Any conversion
+  //     using these keys will throw an error at compilation time.
+  // ============================================================================
+  const FIELD_MAP = {
+    event_name:         'event_name',
+    page_location:      'page_location',
+    page_path:          'page.page_path',
+    page_path_clean:    'page_path_clean',
+    screen_type:        'screen_type',
+    platform:           'platform',
+    stream_id:          'stream_id',
+    event_value_in_usd: 'event_value_in_usd',
+    // item_ fields — resolved after CROSS JOIN UNNEST(items) AS item
+    item_name:          'item.item_name',
+    item_price:         'item.price',
+    item_category:      'item.item_category',
+    item_id:            'item.item_id',
+    item_brand:         'item.item_brand',
+  };
+
+  // ============================================================================
+  // VALUE FORMATTERS
+  // ============================================================================
+
+  function escapeStr(val) {
+    return val.toString().replace(/'/g, "''");
+  }
+
+  function formatValue(val) {
+    if (typeof val === 'string') return `'${escapeStr(val)}'`;
+    return val;
+  }
+
+  function formatInListValues(values) {
+    if (!Array.isArray(values) || values.length === 0) return '[]';
+    if (typeof values[0] === 'string') {
+      return '[' + values.map(v => `'${escapeStr(v)}'`).join(', ') + ']';
+    }
+    return '[' + values.join(', ') + ']';
+  }
+
+  // ============================================================================
+  // CONDITION SQL GENERATOR
+  // ============================================================================
+
+  function generateConditionSQL(fieldExpr, condition) {
+    const mt = condition.match_type;
+    const mv = condition.match_values;
+    switch (mt) {
+      case 'exact':
+        return `${fieldExpr} = ${formatValue(mv)}`;
+      case 'contains':
+        return `LOWER(${fieldExpr}) LIKE LOWER('%${escapeStr(mv)}%')`;
+      case 'not_contains':
+        return `LOWER(${fieldExpr}) NOT LIKE LOWER('%${escapeStr(mv)}%')`;
+      case 'regex':
+        return `REGEXP_CONTAINS(${fieldExpr}, '${escapeStr(mv)}')`;
+      case 'not_regex':
+        return `NOT REGEXP_CONTAINS(${fieldExpr}, '${escapeStr(mv)}')`;
+      case 'greater_than':
+        return `${fieldExpr} > ${mv}`;
+      case 'less_than':
+        return `${fieldExpr} < ${mv}`;
+      case 'greater_than_or_equal':
+        return `${fieldExpr} >= ${mv}`;
+      case 'less_than_or_equal':
+        return `${fieldExpr} <= ${mv}`;
+      case 'in_list':
+        return `${fieldExpr} IN UNNEST(${formatInListValues(mv)})`;
+      case 'not_in_list':
+        return `${fieldExpr} NOT IN UNNEST(${formatInListValues(mv)})`;
+      case 'is_null':
+        return `${fieldExpr} IS NULL`;
+      case 'is_not_null':
+        return `${fieldExpr} IS NOT NULL`;
+      default:
+        throw new Error(`[conversions.sqlx] Unknown match_type '${mt}' in conversion '${conversion.conversion_name}'`);
+    }
+  }
+
+  // ============================================================================
+  // BRANCH SQL GENERATOR
+  // One UNION ALL branch per CONVERSIONS_CONFIG entry.
+  // Detects item_ filter keys and switches between UNNEST and non-UNNEST paths.
+  // ============================================================================
+
+  function generateConversionBranch(conversion) {
+    const { conversion_name } = conversion;
+    const filterKeys = Object.keys(conversion).filter(k => k !== 'conversion_name');
+
+    // Validate all filter keys are in the field map
+    filterKeys.forEach(key => {
+      if (['session_source', 'session_medium', 'session_channel_group'].includes(key)) {
+        throw new Error(
+          `[conversions.sqlx] Filter key '${key}' in conversion '${conversion_name}' ` +
+          `requires a sessions join which is not yet supported in the SQL generator. ` +
+          `FLAG FOR REVIEW.`
+        );
+      }
+      if (!(key in FIELD_MAP)) {
+        throw new Error(
+          `[conversions.sqlx] Unknown filter key '${key}' in conversion '${conversion_name}'. ` +
+          `Key must be an actual column name in base_events. FLAG FOR REVIEW.`
+        );
+      }
+    });
+
+    const needsItemsUnnest = filterKeys.some(k => k.startsWith('item_'));
+
+    const conditions = filterKeys.map(key => {
+      // When unnesting items, qualify non-item base_events columns with b.
+      const fieldExpr = needsItemsUnnest && !key.startsWith('item_')
+        ? 'b.' + FIELD_MAP[key]
+        : FIELD_MAP[key];
+      return generateConditionSQL(fieldExpr, conversion[key]);
+    });
+
+    const whereClause = filterKeys.length > 0
+      ? `  WHERE ${conditions.join('\n    AND ')}`
+      : '';
+
+    if (needsItemsUnnest) {
+      return (
+        `  SELECT\n` +
+        `    b.session_key,\n` +
+        `    '${conversion_name}' AS conversion_name,\n` +
+        `    COUNT(*) AS conversion_event_count\n` +
+        `  FROM ${ref('base_events')} b\n` +
+        `  CROSS JOIN UNNEST(b.items) AS item\n` +
+        (whereClause ? whereClause + '\n' : '') +
+        `  GROUP BY b.session_key`
+      );
+    } else {
+      return (
+        `  SELECT\n` +
+        `    session_key,\n` +
+        `    '${conversion_name}' AS conversion_name,\n` +
+        `    COUNT(*) AS conversion_event_count\n` +
+        `  FROM ${ref('base_events')}\n` +
+        (whereClause ? whereClause + '\n' : '') +
+        `  GROUP BY session_key`
+      );
+    }
+  }
+
+  // ============================================================================
+  // ASSEMBLE all_conversions CTE
+  // Empty config → zero-row scaffold with correct schema.
+  // ============================================================================
+
+  let allConversionsSQL;
+  if (CONVERSIONS_CONFIG.length === 0) {
+    allConversionsSQL =
+      `  -- No conversions defined in CONVERSIONS_CONFIG.\n` +
+      `  -- Returning zero-row scaffold with correct schema.\n` +
+      `  SELECT\n` +
+      `    CAST(NULL AS STRING)  AS session_key,\n` +
+      `    CAST(NULL AS STRING)  AS conversion_name,\n` +
+      `    CAST(0    AS INT64)   AS conversion_event_count\n` +
+      `  FROM ${ref('base_events')}\n` +
+      `  WHERE 1=0`;
+  } else {
+    allConversionsSQL = CONVERSIONS_CONFIG
+      .map(generateConversionBranch)
+      .join('\n\n  UNION ALL\n\n');
+  }
+
+  console.log(`[GA4_CONVERSIONS] Building conversions table with ${CONVERSIONS_CONFIG.length} conversion type(s)`);
+}
+
+WITH all_sessions AS (
+  SELECT
+    session_key,
+    session_date
+  FROM ${ref('sessions')}
+),
+
+all_conversions AS (
+${allConversionsSQL}
+)
+
+SELECT
+  s.session_key,
+  s.session_date,
+  c.conversion_name,
+
+  -- True if at least one qualifying event was found for this conversion
+  COALESCE(a.conversion_event_count > 0, FALSE)                      AS is_conversion,
+
+  -- Surrogate key: stable unique identifier for this session + conversion pair
+  TO_BASE64(MD5(CONCAT(s.session_key, '|', c.conversion_name)))      AS session_conversion_key,
+
+  -- Count of qualifying events; 0 for non-converting sessions
+  COALESCE(a.conversion_event_count, 0)                              AS conversion_event_count
+
+FROM all_sessions s
+
+-- Expand every session to every defined conversion type
+CROSS JOIN (
+  SELECT DISTINCT conversion_name
+  FROM all_conversions
+) c
+
+-- Bring in matching counts where they exist
+LEFT JOIN all_conversions a
+  ON  s.session_key      = a.session_key
+  AND c.conversion_name  = a.conversion_name
