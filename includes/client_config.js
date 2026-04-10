@@ -141,6 +141,53 @@ const CUSTOM_ITEMS_PARAMS = [
 ];
 
 // ============================================================================
+// CONVERSIONS CONFIGURATION
+// ============================================================================
+
+// CONVERSIONS_CONFIG defines conversion events for this client deployment.
+// Each object defines one conversion type.
+//
+// Required field:
+//   conversion_name (STRING): display name for this conversion
+//
+// All other fields are filter conditions applied to base_events.
+// Filter condition keys must be actual column names in base_events.
+// Keys beginning with item_ refer to fields in the items ARRAY<STRUCT>
+// and are handled automatically with UNNEST.
+//
+// Each filter condition has:
+//   match_type: 'exact' | 'contains' | 'not_contains' |
+//               'regex' | 'not_regex' |
+//               'greater_than' | 'less_than' |
+//               'greater_than_or_equal' | 'less_than_or_equal' |
+//               'in_list' | 'not_in_list' |
+//               'is_null' | 'is_not_null'
+//   match_values: scalar value, or array for in_list/not_in_list,
+//                 ignored for is_null/is_not_null
+//
+// All filter conditions within one conversion are AND-ed together.
+// A session is counted as converted if at least one event in the
+// session satisfies all filter conditions.
+//
+// Supported filter condition keys and their SQL mappings are documented
+// in definitions/outputs/conversions.sqlx.
+//
+// Examples:
+//   Page view on a specific URL path:
+//   { conversion_name: 'contact_request',
+//     event_name: { match_type: 'exact', match_values: 'page_view' },
+//     page_location: { match_type: 'contains', match_values: '/thank-you/' } }
+//
+//   Purchase of items matching a name pattern above a price threshold:
+//   { conversion_name: 'key_product_purchase',
+//     event_name: { match_type: 'exact', match_values: 'purchase' },
+//     item_name: { match_type: 'regex', match_values: 'product_a.*' },
+//     item_price: { match_type: 'greater_than', match_values: 10 } }
+//
+// Leave empty for deployments with no conversions defined:
+const CONVERSIONS_CONFIG = [];
+
+// ============================================================================
 // ECOMMERCE EVENT CONFIGURATION
 // ============================================================================
 
@@ -184,7 +231,10 @@ const clientConfig = {
 
     // Ecommerce Event Config
     TRANSACTION_EVENTS,
-    ECOMMERCE_ITEM_EVENTS
+    ECOMMERCE_ITEM_EVENTS,
+
+    // Conversions Config
+    CONVERSIONS_CONFIG
 };
 
 module.exports = { clientConfig };
