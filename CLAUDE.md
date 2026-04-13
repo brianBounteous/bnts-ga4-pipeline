@@ -65,6 +65,7 @@ Downstream repos extend this structure by populating `definitions/custom/` with 
 - snake_case for variable and function names (consistent with SQL conventions)
 - Use JavaScript in Dataform for reusable config, constants, and dynamic SQL generation
 - Keep JS logic minimal — the SQL should be readable on its own
+- Dataform compilation variables are always strings; use `!== 'true'` in config blocks, never truthy/falsy checks.
 
 ### URL Cleaning
 
