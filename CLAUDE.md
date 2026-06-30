@@ -13,6 +13,13 @@ This repo is the **upstream core**. It manages all upstream models and shared lo
 
 When working in this repo, always consider that changes affect all downstream deployments. Avoid client-specific logic here.
 
+## Local Environment
+All repos are cloned at:
+/Users/brian.phillips/Library/CloudStorage/OneDrive-Bounteous/Documents/code/bounteous_internal/bitbucket/
+
+Never use ~/code/, ~/Documents/, or any other path shortcut when referencing
+local repos. Always use the full absolute path above.
+
 ## Tech Stack
 
 - **SQL engine:** BigQuery (Standard SQL only — never Legacy SQL)
