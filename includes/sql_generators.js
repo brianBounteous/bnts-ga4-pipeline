@@ -15,6 +15,13 @@ const config = helpers.getConfig();
  */
 function extractParamsSQL(paramsArray, sourceArray = 'event_params') {
   return paramsArray.map(param => {
+    // GA4's BigQuery export inconsistently writes session_engaged to either
+    // string_value or int_value depending on the hit; reading only one field
+    // silently nulls (and undercounts) rows where GA4 used the other.
+    if (param.name === 'session_engaged') {
+      return `(SELECT COALESCE(value.string_value, CAST(value.int_value AS STRING)) FROM UNNEST(${sourceArray}) WHERE key = 'session_engaged') AS session_engaged`;
+    }
+
     let valueField;
 
     switch(param.type.toLowerCase()) {
