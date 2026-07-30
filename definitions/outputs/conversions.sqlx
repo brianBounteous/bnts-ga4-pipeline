@@ -1,9 +1,9 @@
 config {
   type: "table",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "One row per session_key + conversion_name. Partitioned by session_date and clustered by session_key and conversion_name. Every session appears once per conversion type defined in CONVERSIONS_CONFIG, regardless of whether it converted. Use is_conversion to filter to converting sessions and conversion_event_count for intensity. Join to sessions via session_key.",
   tags: ["daily", "ga4", "conversions", "reporting"],
-  dependencies: ["sessions", "base_events"],
+  dependencies: ["sessions_core", "base_events"],
   bigquery: {
     partitionBy: "session_date",
     clusterBy: ["session_key", "conversion_name"]
@@ -208,7 +208,7 @@ WITH all_sessions AS (
   SELECT
     session_key,
     session_date
-  FROM ${ref('sessions')}
+  FROM ${ref('sessions_core')}
 ),
 
 all_conversions AS (

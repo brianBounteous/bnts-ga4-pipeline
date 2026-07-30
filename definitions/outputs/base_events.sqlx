@@ -1,6 +1,6 @@
 config {
   type: "incremental",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "One row per GA4 event hit, sourced from the raw BigQuery export. Partitioned by event_date and clustered by event_name and session_key. Refreshed incrementally with a 3-day rolling window to capture late-arriving events. This is the foundation table from which all other staging tables are built — sessions, users, fct_page_views, transactions, and ecommerce_items all read from base_events.",
   tags: ["daily", "ga4", "core"],
   dependencies: ["base_events_preops"],

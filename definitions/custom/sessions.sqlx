@@ -1,0 +1,11 @@
+config {
+  type: "view",
+  schema: dataform.projectConfig.vars.REPORTING_DATASET,
+  description: "Client-facing sessions table, in the reporting dataset. Starts as a passthrough of sessions_core (the framework-owned build in the core dataset) — add client-specific columns here as needed. This file is client-owned and protected from upstream merges via .gitattributes.",
+  tags: ["daily", "ga4", "sessions", "reporting", "custom"],
+  dependencies: ["sessions_core"]
+}
+
+-- Starter passthrough view. Add client-specific columns (e.g. landing_page_category, sales_region) below.
+SELECT *
+FROM ${ref("sessions_core")}

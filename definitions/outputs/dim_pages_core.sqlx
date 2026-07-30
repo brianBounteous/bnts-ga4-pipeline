@@ -11,8 +11,9 @@ js {
 
 config {
   type: "table",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
-  description: "One row per unique page or screen, identified by a content hash key. Clustered by screen_type. Stores the most recently observed title, URL, and path for each content item (Type 1 slowly changing dimension — no history is kept). Rebuilt fully on each run. Join to fct_page_views and sessions via the key column.",
+  name: "dim_pages_core",
+  schema: dataform.projectConfig.vars.CORE_DATASET,
+  description: "One row per unique page or screen, identified by a content hash key. Clustered by screen_type. Stores the most recently observed title, URL, and path for each content item (Type 1 slowly changing dimension — no history is kept). Rebuilt fully on each run. Join to fct_page_views and sessions via the key column. This is the framework-owned build — lives in the core dataset and is not intended to be queried directly. Client forks should query the 'dim_pages' view in the reporting dataset instead (definitions/custom/dim_pages.sqlx), which adds any client-specific columns on top of this table.",
   tags: ["daily", "ga4", "pages", "dimensions", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],
   bigquery: {

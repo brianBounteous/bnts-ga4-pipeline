@@ -1,6 +1,6 @@
 config {
   type: "table",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "Tier 2: Cross-model consistency report. Does not block pipeline execution.",
   tags: ["daily", "ga4", "assertion", "tier2"],
   dependencies: ["model_execution_log"]
@@ -40,9 +40,9 @@ model_pairs AS (
     uim.row_count AS identity_map_rows,
     u.row_count AS users_rows
   FROM current_run be
-  LEFT JOIN current_run s ON be.event_date = s.event_date AND s.model_name = 'sessions'
+  LEFT JOIN current_run s ON be.event_date = s.event_date AND s.model_name = 'sessions_core'
   LEFT JOIN current_run pv ON be.event_date = pv.event_date AND pv.model_name = 'fct_page_views'
-  LEFT JOIN current_run dp ON be.event_date = dp.event_date AND dp.model_name = 'dim_pages'
+  LEFT JOIN current_run dp ON be.event_date = dp.event_date AND dp.model_name = 'dim_pages_core'
   LEFT JOIN current_run uim ON be.event_date = uim.event_date AND uim.model_name = 'user_identity_map'
   LEFT JOIN current_run u ON be.event_date = u.event_date AND u.model_name = 'users'
   WHERE be.model_name = 'base_events'

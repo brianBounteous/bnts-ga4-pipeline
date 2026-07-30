@@ -1,12 +1,12 @@
 config {
   type: "incremental",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "Audit log tracking execution of all pipeline models",
   tags: ["daily", "ga4", "core", "audit"],
   dependencies: [
     "base_events",
-    "sessions",
-    "dim_pages",
+    "sessions_core",
+    "dim_pages_core",
     "fct_page_views",
     "transactions",
     "ecommerce_items",
@@ -24,7 +24,7 @@ js {
   const config = helpers.getConfig();
 
   const enabledModels = [
-    'base_events', 'sessions', 'dim_pages', 'fct_page_views',
+    'base_events', 'sessions_core', 'dim_pages_core', 'fct_page_views',
     'user_identity_map', 'users'
   ];
 
@@ -94,7 +94,7 @@ sessions_stats AS (
     MAX(session_end_timestamp) AS max_event_timestamp,
     COUNT(DISTINCT session_key) AS sessions,
     COUNT(DISTINCT user_id) AS users
-  FROM ${ref("sessions")}
+  FROM ${ref("sessions_core")}
   WHERE session_date >= ${dateStartSQL}
     AND session_date <= ${dateEndSQL}
   GROUP BY session_date
@@ -108,7 +108,7 @@ dim_pages_stats AS (
     CAST(NULL AS INT64) AS max_event_timestamp,
     CAST(NULL AS INT64) AS sessions,
     CAST(NULL AS INT64) AS users
-  FROM ${ref("dim_pages")}
+  FROM ${ref("dim_pages_core")}
   WHERE last_seen_date >= ${dateStartSQL}
     AND last_seen_date <= ${dateEndSQL}
   GROUP BY last_seen_date
@@ -200,7 +200,7 @@ FROM date_spine d LEFT JOIN base_events_stats s ON d.event_date = s.event_date
 UNION ALL
 
 SELECT CURRENT_TIMESTAMP(), CURRENT_DATE(),
-  'sessions', d.event_date,
+  'sessions_core', d.event_date,
   COALESCE(s.row_count, 0), s.min_event_timestamp, s.max_event_timestamp,
   COALESCE(s.sessions, 0), COALESCE(s.users, 0)
 FROM date_spine d LEFT JOIN sessions_stats s ON d.event_date = s.event_date
@@ -208,7 +208,7 @@ FROM date_spine d LEFT JOIN sessions_stats s ON d.event_date = s.event_date
 UNION ALL
 
 SELECT CURRENT_TIMESTAMP(), CURRENT_DATE(),
-  'dim_pages', d.event_date,
+  'dim_pages_core', d.event_date,
   COALESCE(s.row_count, 0), s.min_event_timestamp, s.max_event_timestamp,
   s.sessions, s.users
 FROM date_spine d LEFT JOIN dim_pages_stats s ON d.event_date = s.event_date

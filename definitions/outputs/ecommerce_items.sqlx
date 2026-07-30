@@ -1,7 +1,7 @@
 config {
   type: "table",
   disabled: dataform.projectConfig.vars.HAS_ECOMMERCE !== 'true',
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "One row per item per ecommerce event (view_item, add_to_cart, remove_from_cart, begin_checkout, purchase, refund, and others configured in ECOMMERCE_ITEM_EVENTS). Partitioned by event_date and clustered by item_id and session_key. Only populated when HAS_ECOMMERCE is enabled in workflow_settings.yaml. Join to transactions via transaction_id for purchase and refund events.",
   tags: ["daily", "ga4", "ecommerce", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],

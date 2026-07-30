@@ -4,5 +4,5 @@
 workflow_settings.yaml merge=ours
 includes/client_config.js merge=ours
 includes/traffic_source.js merge=ours
-definitions/declaration.js merge=ours
+definitions/declarations.js merge=ours
 definitions/custom/** merge=ours

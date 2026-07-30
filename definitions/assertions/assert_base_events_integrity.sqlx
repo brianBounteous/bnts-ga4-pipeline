@@ -1,6 +1,6 @@
 config {
   type: "assertion",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "Tier 1: Structural integrity checks on base_events. Blocks downstream models on failure.",
   tags: ["daily", "ga4", "assertion", "tier1"],
   dependencies: ["base_events"]

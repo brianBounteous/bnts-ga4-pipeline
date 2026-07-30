@@ -11,7 +11,7 @@ js {
 
 config {
   type: "table",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "One row per unique page or screen view within a session, aggregated from base_events. Partitioned by event_date and clustered by session_key. The grain is one content item per session (for example, a user visiting the same page twice in a session produces one row). Join to sessions via session_key and to dim_pages via the key column for page attributes such as location, path, and title.",
   tags: ["daily", "ga4", "pages", "facts", "reporting"],
   dependencies: ["base_events", "assert_base_events_integrity"],

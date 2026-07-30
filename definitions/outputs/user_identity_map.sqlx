@@ -1,6 +1,6 @@
 config {
   type: "table",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "One row per unique user_pseudo_id and user_id pairing observed in the event stream. Tracks when each identity relationship was first and last seen, and how many events and sessions it represents. Clustered by user_pseudo_id and user_id. Used by the users table to resolve cross-device identity.",
   tags: ["daily", "ga4", "users"],
   dependencies: ["base_events", "assert_base_events_integrity"],

@@ -1,6 +1,6 @@
 config {
   type: "operations",
-  schema: dataform.projectConfig.vars.DESTINATION_DATASET,
+  schema: dataform.projectConfig.vars.CORE_DATASET,
   description: "Deletes last 3 days from base_events before refresh (skips if table doesn't exist)",
   tags: ["daily", "ga4", "core"],
   hasOutput: false,
@@ -11,12 +11,12 @@ DECLARE table_exists BOOL DEFAULT FALSE;
 
 SET table_exists = (
   SELECT COUNT(*) > 0
-  FROM `${dataform.projectConfig.vars.SOURCE_PROJECT}.${dataform.projectConfig.vars.DESTINATION_DATASET}.INFORMATION_SCHEMA.TABLES`
+  FROM `${dataform.projectConfig.vars.SOURCE_PROJECT}.${dataform.projectConfig.vars.CORE_DATASET}.INFORMATION_SCHEMA.TABLES`
   WHERE table_name = 'base_events'
 );
 
 IF table_exists THEN
-  DELETE FROM `${dataform.projectConfig.vars.SOURCE_PROJECT}.${dataform.projectConfig.vars.DESTINATION_DATASET}.base_events`
+  DELETE FROM `${dataform.projectConfig.vars.SOURCE_PROJECT}.${dataform.projectConfig.vars.CORE_DATASET}.base_events`
   WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
     AND event_date <= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
 END IF;

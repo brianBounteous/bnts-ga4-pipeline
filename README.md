@@ -20,16 +20,28 @@ Bounteous maintains this framework repo. Each client deployment is a Bitbucket f
 ```
 GA4 Export (events_*, events_fresh_*)
            ↓
-    [base_events] ─── Event-level data, 3-day rolling refresh
+    [base_events] ─── Event-level data, 3-day rolling refresh (CORE_DATASET)
            ↓
-    ┌──────────┬──────────────────┬─────────────────────┐
-    ↓          ↓                  ↓                     ↓
-[sessions]  [dim_pages]     [transactions]      [user_identity_map]
-            [fct_page_views] [ecommerce_items]   [users]
-                              (if HAS_ECOMMERCE)
+    ┌────────────────┬──────────────────┬─────────────────────┐
+    ↓                ↓                  ↓                     ↓
+[sessions_core]  [dim_pages_core]  [transactions]      [user_identity_map]
+                 [fct_page_views]  [ecommerce_items]   [users]
+                                    (if HAS_ECOMMERCE)
            ↓
     [model_execution_log] ─── Audit log (runs last)
+
+    ┌──────────────────────────────────────────┐
+    ↓                                          ↓
+[sessions]                              [dim_pages]
+(REPORTING_DATASET — client-owned view,  (REPORTING_DATASET — client-owned view,
+ definitions/custom/sessions.sqlx)        definitions/custom/dim_pages.sqlx)
 ```
+
+### Core / Reporting Dataset Split
+
+Framework-owned tables (`base_events`, `sessions_core`, `dim_pages_core`, `users`, etc.) compile into `CORE_DATASET` and are rebuilt however the framework defines them — never edit them in a client fork. `sessions` and `dim_pages` additionally get a client-owned reporting view in `REPORTING_DATASET` (`definitions/custom/sessions.sqlx` / `dim_pages.sqlx`), which starts as a plain passthrough (`SELECT * FROM sessions_core`) and is where any client-specific columns (e.g. `page_category`, `sales_region`) get added. BI tools and analysts should query the reporting dataset, not the core one.
+
+This keeps client customization entirely inside `definitions/custom/**` (protected from upstream merges via `.gitattributes`) instead of inside the framework's own output files, so pulling framework updates never produces a merge conflict. Apply the same pattern — a `<table>_core` build plus a passthrough view in `definitions/custom/<table>.sqlx` — to any other output table a client needs to extend (`users`, `fct_page_views`, etc.); it isn't pre-built for tables nobody's customizing yet.
 
 ### Key Design Decisions
 
@@ -69,7 +81,8 @@ This activates the `.gitattributes` merge driver that preserves client-owned fil
 vars:
   SOURCE_PROJECT: "your-gcp-project"
   SOURCE_DATASET: "analytics_123456789"
-  DESTINATION_DATASET: "ga4_reporting"
+  CORE_DATASET: "ga4_core"        # framework-owned tables
+  REPORTING_DATASET: "ga4_reporting"  # client-owned views (definitions/custom/**)
   HAS_ECOMMERCE: "false"          # "true" to enable ecommerce models
   ENVIRONMENT: "production"       # "development" for dev runs
 ```
@@ -113,7 +126,8 @@ Controls what gets compiled into the Dataform execution graph. Variables here ac
 |----------|--------|-------------|
 | `SOURCE_PROJECT` | GCP project ID | Source GA4 export project |
 | `SOURCE_DATASET` | dataset name | GA4 export dataset |
-| `DESTINATION_DATASET` | dataset name | Output staging dataset |
+| `CORE_DATASET` | dataset name | Framework-owned output tables (e.g. `base_events`, `sessions_core`, `dim_pages_core`) |
+| `REPORTING_DATASET` | dataset name | Client-owned reporting views (`definitions/custom/**`) — query this, not `CORE_DATASET`, for BI/analysis |
 | `HAS_ECOMMERCE` | `"true"` / `"false"` | Enables ecommerce models |
 | `ENVIRONMENT` | `"production"` / `"development"` | Controls dev vs prod behavior |
 
@@ -152,8 +166,8 @@ These files are owned by the client fork and are preserved automatically during 
 | `workflow_settings.yaml` | Project/dataset settings and feature flags |
 | `includes/client_config.js` | Data processing configuration |
 | `includes/traffic_source.js` | Custom attribution logic |
-| `definitions/declaration.js` | Source table declarations |
-| `definitions/custom/**` | All client-specific models |
+| `definitions/declarations.js` | Source table declarations |
+| `definitions/custom/**` | All client-specific models, including the `sessions`/`dim_pages` reporting views |
 
 ### Pulling Upstream Updates
 
@@ -223,17 +237,19 @@ For large backfills, split into monthly chunks with separate releases.
 ├── definitions/
 │   ├── outputs/
 │   │   ├── base_events_preops.sqlx   ← Cleanup operation (deletes 3-day window)
-│   │   ├── base_events.sqlx          ← Core event table (incremental)
-│   │   ├── sessions.sqlx             ← Session aggregations
-│   │   ├── dim_pages.sqlx            ← Page/screen dimension (Type 1 SCD)
-│   │   ├── fct_page_views.sqlx       ← Page view facts (page-session grain)
-│   │   ├── transactions.sqlx         ← Transaction events (ecommerce)
-│   │   ├── ecommerce_items.sqlx      ← Item-level ecommerce (ecommerce)
-│   │   ├── user_identity_map.sqlx    ← Pseudo-ID to user-ID resolution
-│   │   ├── users.sqlx                ← User-level lifetime aggregations
-│   │   └── model_execution_log.sqlx  ← Pipeline audit log
+│   │   ├── base_events.sqlx          ← Core event table (incremental)          [CORE_DATASET]
+│   │   ├── sessions_core.sqlx        ← Session aggregations                    [CORE_DATASET]
+│   │   ├── dim_pages_core.sqlx       ← Page/screen dimension (Type 1 SCD)      [CORE_DATASET]
+│   │   ├── fct_page_views.sqlx       ← Page view facts (page-session grain)    [CORE_DATASET]
+│   │   ├── transactions.sqlx         ← Transaction events (ecommerce)          [CORE_DATASET]
+│   │   ├── ecommerce_items.sqlx      ← Item-level ecommerce (ecommerce)        [CORE_DATASET]
+│   │   ├── user_identity_map.sqlx    ← Pseudo-ID to user-ID resolution         [CORE_DATASET]
+│   │   ├── users.sqlx                ← User-level lifetime aggregations        [CORE_DATASET]
+│   │   └── model_execution_log.sqlx  ← Pipeline audit log                      [CORE_DATASET]
 │   ├── custom/                       ← Client-specific models              [fork-owned]
-│   └── declaration.js                ← Source table declarations           [fork-owned]
+│   │   ├── sessions.sqlx             ← Reporting view over sessions_core   [fork-owned, REPORTING_DATASET]
+│   │   └── dim_pages.sqlx            ← Reporting view over dim_pages_core  [fork-owned, REPORTING_DATASET]
+│   └── declarations.js               ← Source table declarations           [fork-owned]
 ├── workflow_settings.yaml            ← Project settings & compilation vars [fork-owned]
 ├── .gitattributes                    ← Merge protection for fork-owned files
 └── README.md

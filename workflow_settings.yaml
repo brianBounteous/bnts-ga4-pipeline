@@ -1,10 +1,11 @@
-defaultDataset: ga4_reporting
+defaultDataset: ga4_core
 defaultLocation: US
-defaultProject: server-side-bounteous-ga4-2024
-vars: 
-    DESTINATION_DATASET: ga4_reporting
-    SOURCE_DATASET: analytics_452829362
-    SOURCE_PROJECT: server-side-bounteous-ga4-2024
+defaultProject: your-gcp-project
+vars:
+    CORE_DATASET: ga4_core
+    REPORTING_DATASET: ga4_reporting
+    SOURCE_DATASET: analytics_XXXXXXXXX
+    SOURCE_PROJECT: your-gcp-project
     SOURCE_TABLE_PREFIX: events_
-    ENVIRONMENT: prod  
+    ENVIRONMENT: prod
     HAS_ECOMMERCE: 'false'

@@ -1,0 +1,11 @@
+config {
+  type: "view",
+  schema: dataform.projectConfig.vars.REPORTING_DATASET,
+  description: "Client-facing page dimension table, in the reporting dataset. Starts as a passthrough of dim_pages_core (the framework-owned build in the core dataset) — add client-specific columns here as needed. This file is client-owned and protected from upstream merges via .gitattributes.",
+  tags: ["daily", "ga4", "pages", "dimensions", "reporting", "custom"],
+  dependencies: ["dim_pages_core"]
+}
+
+-- Starter passthrough view. Add client-specific columns (e.g. page_category, site_name) below.
+SELECT *
+FROM ${ref("dim_pages_core")}
