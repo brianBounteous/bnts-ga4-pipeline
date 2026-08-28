@@ -337,7 +337,8 @@ js {
         AND _TABLE_SUFFIX NOT LIKE 'intraday%'`;
     } else {
       dateFilter = `_TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
-                    AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))`;
+                    AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
+        AND _TABLE_SUFFIX NOT LIKE 'intraday%'`;
     }
 
     return `
