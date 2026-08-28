@@ -65,6 +65,23 @@ WHERE total_rows = 0
 
 UNION ALL
 
+-- Check 1b: Rows loaded, but the 3-day window isn't fully covered (a partial
+-- reconciliation run — e.g. one source date missing or late — would otherwise
+-- pass every other check since they only look at rates, not date coverage).
+SELECT 'INCOMPLETE_WINDOW' AS check_name,
+  FORMAT('Only %d of 3 expected dates loaded (min: %s, max: %s). Expected dates: %s to %s',
+    dates_loaded,
+    CAST(min_date AS STRING),
+    CAST(max_date AS STRING),
+    CAST(DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY) AS STRING),
+    CAST(DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY) AS STRING)
+  ) AS detail
+FROM date_coverage
+WHERE total_rows > 0
+  AND dates_loaded < 3
+
+UNION ALL
+
 -- Check 2: Critical fields null at >5% rate
 SELECT 'HIGH_NULL_RATE' AS check_name,
   FORMAT('Null rates — event_name: %d/%d (%.1f%%), event_key: %d/%d (%.1f%%)',
