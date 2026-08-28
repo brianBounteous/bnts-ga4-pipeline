@@ -27,10 +27,9 @@ js {
   // Maps CONVERSIONS_CONFIG filter condition keys to SQL expressions in base_events.
   //
   // Notes:
-  //   - page_location is a flat column in base_events (extracted from event_params
-  //     via WEB_PARAMS_ARRAY). Use directly without struct prefix.
-  //   - page_path is generated inside the page STRUCT in base_events (not flat).
-  //     Must be referenced as page.page_path.
+  //   - page_location and page_path are generated inside the page STRUCT in
+  //     base_events (not flat). Must be referenced as page.page_location /
+  //     page.page_path.
   //   - page_path_clean is a flat column when included in CUSTOM_PARAMS_ARRAY.
   //   - item_ keys require CROSS JOIN UNNEST(items) AS item; detected automatically.
   //   - session_source, session_medium, session_channel_group require a join to the
@@ -39,7 +38,7 @@ js {
   // ============================================================================
   const FIELD_MAP = {
     event_name:         'event_name',
-    page_location:      'page_location',
+    page_location:      'page.page_location',
     page_path:          'page.page_path',
     page_path_clean:    'page_path_clean',
     screen_type:        'screen_type',
