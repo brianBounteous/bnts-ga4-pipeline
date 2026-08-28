@@ -1,7 +1,7 @@
 config {
   type: "incremental",
   schema: dataform.projectConfig.vars.CORE_DATASET,
-  description: "One row per GA4 event hit, sourced from the raw BigQuery export. Partitioned by event_date and clustered by event_name and session_key. Refreshed incrementally with a 3-day rolling window to capture late-arriving events. This is the foundation table from which all other staging tables are built — sessions, users, fct_page_views, transactions, and ecommerce_items all read from base_events.",
+  description: "One row per GA4 event hit, sourced from the raw BigQuery export. Partitioned by event_date and clustered by event_name and session_key. Refreshed incrementally with a rolling reconciliation window (RECONCILIATION_LOOKBACK_DAYS in core_config.js) to capture late-arriving events. This is the foundation table from which all other staging tables are built — sessions, users, fct_page_views, transactions, and ecommerce_items all read from base_events.",
   tags: ["daily", "ga4", "core"],
   dependencies: ["base_events_preops"],
   bigquery: {
@@ -310,7 +310,7 @@ js {
         SELECT * FROM ${ref({schema: sourceDataset, name: 'events_*'})}
         WHERE _TABLE_SUFFIX NOT LIKE 'intraday%'
           AND _TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL ${config.INITIAL_LOAD_DAYS} DAY))
-                                AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
+                                AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL ${config.RECONCILIATION_LOOKBACK_DAYS} DAY))
           AND (${streamFilter})`;
       } else {
         // Incremental with mixed sources
@@ -324,7 +324,7 @@ js {
 
         SELECT * FROM ${ref({schema: sourceDataset, name: 'events_*'})}
         WHERE _TABLE_SUFFIX NOT LIKE 'intraday%'
-          AND _TABLE_SUFFIX = FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
+          AND _TABLE_SUFFIX = FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL ${config.RECONCILIATION_LOOKBACK_DAYS} DAY))
           AND (${streamFilter})`;
       }
     }
@@ -336,7 +336,7 @@ js {
                     AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
         AND _TABLE_SUFFIX NOT LIKE 'intraday%'`;
     } else {
-      dateFilter = `_TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY))
+      dateFilter = `_TABLE_SUFFIX BETWEEN FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL ${config.RECONCILIATION_LOOKBACK_DAYS} DAY))
                     AND FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY))
         AND _TABLE_SUFFIX NOT LIKE 'intraday%'`;
     }

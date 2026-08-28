@@ -6,6 +6,12 @@ config {
   dependencies: ["base_events"]
 }
 
+js {
+  const helpers = require('includes/helper.js');
+  const config = helpers.getConfig();
+  const lookbackDays = config.RECONCILIATION_LOOKBACK_DAYS;
+}
+
 -- Returns rows that FAIL the check. Any rows = assertion failure.
 
 WITH date_coverage AS (
@@ -15,7 +21,7 @@ WITH date_coverage AS (
     MAX(event_date) AS max_date,
     COUNT(*) AS total_rows
   FROM ${ref("base_events")}
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ${lookbackDays} DAY)
     AND event_date < CURRENT_DATE()
 ),
 
@@ -27,7 +33,7 @@ null_rates AS (
     COUNTIF(user_id IS NULL OR user_id = '') AS null_user_ids,
     COUNTIF(event_key IS NULL OR event_key = '') AS null_event_keys
   FROM ${ref("base_events")}
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ${lookbackDays} DAY)
     AND event_date < CURRENT_DATE()
 ),
 
@@ -38,7 +44,7 @@ duplicate_keys AS (
   FROM (
     SELECT event_key, COUNT(*) AS occurrence_count
     FROM ${ref("base_events")}
-    WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+    WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ${lookbackDays} DAY)
       AND event_date < CURRENT_DATE()
     GROUP BY event_key
     HAVING COUNT(*) > 1
@@ -50,14 +56,14 @@ session_component_rates AS (
     COUNT(*) AS total_rows,
     COUNTIF(ga_session_id IS NULL OR user_id IS NULL) AS missing_session_components
   FROM ${ref("base_events")}
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ${lookbackDays} DAY)
     AND event_date < CURRENT_DATE()
 )
 
 -- Check 1: No data loaded
 SELECT 'NO_DATA' AS check_name,
   FORMAT('No rows loaded for refresh window. Expected dates: %s to %s',
-    CAST(DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY) AS STRING),
+    CAST(DATE_SUB(CURRENT_DATE(), INTERVAL ${lookbackDays} DAY) AS STRING),
     CAST(DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY) AS STRING)
   ) AS detail
 FROM date_coverage
@@ -65,20 +71,20 @@ WHERE total_rows = 0
 
 UNION ALL
 
--- Check 1b: Rows loaded, but the 3-day window isn't fully covered (a partial
--- reconciliation run — e.g. one source date missing or late — would otherwise
--- pass every other check since they only look at rates, not date coverage).
+-- Check 1b: Rows loaded, but the reconciliation window isn't fully covered (a
+-- partial reconciliation run — e.g. one source date missing or late — would
+-- otherwise pass every other check since they only look at rates, not date coverage).
 SELECT 'INCOMPLETE_WINDOW' AS check_name,
-  FORMAT('Only %d of 3 expected dates loaded (min: %s, max: %s). Expected dates: %s to %s',
+  FORMAT('Only %d of ${lookbackDays} expected dates loaded (min: %s, max: %s). Expected dates: %s to %s',
     dates_loaded,
     CAST(min_date AS STRING),
     CAST(max_date AS STRING),
-    CAST(DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY) AS STRING),
+    CAST(DATE_SUB(CURRENT_DATE(), INTERVAL ${lookbackDays} DAY) AS STRING),
     CAST(DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY) AS STRING)
   ) AS detail
 FROM date_coverage
 WHERE total_rows > 0
-  AND dates_loaded < 3
+  AND dates_loaded < ${lookbackDays}
 
 UNION ALL
 
