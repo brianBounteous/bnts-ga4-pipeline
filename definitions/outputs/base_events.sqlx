@@ -715,4 +715,8 @@ keys_added AS (
     FROM processed_events
 )
 
+-- Dedup on event_key: makes a retried run (INSERT re-run without its
+-- paired DELETE) idempotent instead of relying solely on the downstream
+-- DUPLICATE_KEYS assertion's 1% tolerance to catch it after the fact.
 SELECT * FROM keys_added
+QUALIFY ROW_NUMBER() OVER (PARTITION BY event_key ORDER BY event_timestamp) = 1
