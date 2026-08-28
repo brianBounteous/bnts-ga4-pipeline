@@ -48,7 +48,8 @@ This keeps client customization entirely inside `definitions/custom/**` (protect
 - **Consolidated over fragmented** — wide tables instead of many narrow joins
 - **Type 1 SCD for dimensions** — current-state only, no history tracking
 - **Page-session grain for facts** — `fct_page_views` is keyed on page × session
-- **3-day rolling refresh** — `base_events` deletes and reloads the last 3 days on each run, capturing late-arriving GA4 events without complex MERGE reconciliation
+- **Rolling reconciliation refresh** — `base_events` deletes and reloads the trailing `RECONCILIATION_LOOKBACK_DAYS` window (`core_config.js`, default 3 days) on each run, capturing late-arriving GA4 events. This is a delete-then-insert, not a `MERGE`. Dataform supports `uniqueKey` + `updatePartitionFilter` to generate a merge natively, so the reason to avoid it here is cost, not implementation complexity: a merge at event grain has to match every incoming row against every existing row in the window, which is materially more expensive at GA4 event volume than an unconditional delete + insert. See "Reconciliation: known tradeoffs" below for what this choice costs.
+- **Today's intraday data is never loaded** — the rolling window only ever loads a GA4 date once it has fully closed (starting at `RECONCILIATION_LOOKBACK_DAYS` ago), then keeps revising it until it passes out of the window. This is a deliberate freshness/stability tradeoff, not an oversight: GA4's intraday export is the least reliable slice of the data (fields like session attribution and engagement aren't final), and mixing it into `base_events` would make session-level numbers shift under stakeholders. If same-day visibility becomes a requirement, prefer a separate `base_events_intraday` model unioned at the reporting layer over merging unreconciled rows into `base_events` itself.
 - **Config-driven** — parameter extraction, stream types, and traffic source logic are controlled through two files (`workflow_settings.yaml` and `client_config.js`) rather than code changes
 
 ---
@@ -256,6 +257,16 @@ For large backfills, split into monthly chunks with separate releases.
 ```
 
 ---
+
+## Reconciliation: Known Tradeoffs
+
+`base_events_preops.sqlx` (DELETE) and `base_events.sqlx` (INSERT) are two separate Dataform actions, not one atomic statement. This is an accepted tradeoff, not an unhandled bug — documented here so the reasoning doesn't get lost:
+
+- **The exposure window is real but narrow.** If the INSERT fails, times out, or the run is killed between the two steps, `base_events` is left with a gap in the reconciliation window until the *next successful run* repairs it — which can be up to ~24 hours on a daily schedule, not just the runtime of the job itself.
+- **Downstream tables are protected, not exposed.** `sessions_core`, `dim_pages_core`, `fct_page_views`, `transactions`, `ecommerce_items`, `user_identity_map`, and `users` all declare `assert_base_events_integrity` as an explicit dependency. If `base_events` fails, the assertion never runs, so nothing downstream runs either — those tables (and the `definitions/custom/**` reporting views built on `sessions_core`/`dim_pages_core`) stay on yesterday's data (stale but internally consistent), rather than reading through the gap.
+- **What is exposed:** a query hitting `base_events` directly during the gap window (e.g. an ad hoc BI pull against `CORE_DATASET`, which client-facing analysts shouldn't be querying directly anyway per the Core/Reporting split above).
+- **Why we haven't wrapped it in a transaction.** BigQuery multi-statement transactions could close this gap, but this exact DELETE step has caused unresolved problems in this pipeline's history before (motivating `base_events_preops.sqlx`'s current design) that we no longer have full context on, and it's unconfirmed whether Dataform executes `pre_operations`/action/`post_operations` as a single script that a transaction could span. Given failures here are loud (the Dataform run fails visibly) and the repair is a one-click re-run, the cost/risk of reworking this was judged not worth it relative to the size of the exposure.
+- **What is in place instead:** `base_events` deduplicates on `event_key` via `QUALIFY ROW_NUMBER()`, so a retried INSERT (without its paired DELETE) is idempotent rather than double-inserting. `assert_base_events_integrity` also checks for `NO_DATA` and `INCOMPLETE_WINDOW` (a partial run that loads fewer than `RECONCILIATION_LOOKBACK_DAYS` of the expected dates) in addition to null-rate and duplicate-key thresholds.
 
 ## Known Gotchas
 
