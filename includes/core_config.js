@@ -28,6 +28,16 @@ const HAS_ECOMMERCE = dataform.projectConfig.vars.HAS_ECOMMERCE === 'true';
  */
 const INITIAL_LOAD_DAYS = 7;
 
+/**
+ * Reconciliation lookback window (days) - base_events_preops deletes and
+ * base_events re-inserts this many trailing days on every incremental run,
+ * to capture late-arriving/corrected GA4 events. Referenced by
+ * base_events_preops.sqlx, base_events.sqlx's incremental date filter,
+ * assert_base_events_integrity.sqlx, and model_execution_log.sqlx — change
+ * here, not per-file.
+ */
+const RECONCILIATION_LOOKBACK_DAYS = 3;
+
 // ============================================================================
 // EXPORT
 // ============================================================================
@@ -37,7 +47,8 @@ const coreConfig = {
   BACKFILL_START_DATE,
   BACKFILL_END_DATE,
   HAS_ECOMMERCE,
-  INITIAL_LOAD_DAYS
+  INITIAL_LOAD_DAYS,
+  RECONCILIATION_LOOKBACK_DAYS
 };
 
 module.exports = { coreConfig };

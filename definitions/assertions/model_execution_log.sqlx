@@ -33,13 +33,13 @@ js {
   }
 
   // Compute date range SQL expressions to match the processing window used by base_events.
-  // Incremental: 3-day rolling refresh window
+  // Incremental: RECONCILIATION_LOOKBACK_DAYS rolling refresh window
   // Initial load (non-incremental, no backfill): INITIAL_LOAD_DAYS back to yesterday
   // Backfill (non-incremental, FORCE_FULL_BACKFILL=true): BACKFILL_START_DATE to BACKFILL_END_DATE
   let dateStartSQL, dateEndSQL;
 
   if (incremental()) {
-    dateStartSQL = 'DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)';
+    dateStartSQL = `DATE_SUB(CURRENT_DATE(), INTERVAL ${config.RECONCILIATION_LOOKBACK_DAYS} DAY)`;
     dateEndSQL = 'DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)';
   } else if (config.FORCE_FULL_BACKFILL) {
     dateStartSQL = config.BACKFILL_START_DATE

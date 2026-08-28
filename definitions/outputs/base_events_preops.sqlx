@@ -1,10 +1,16 @@
 config {
   type: "operations",
   schema: dataform.projectConfig.vars.CORE_DATASET,
-  description: "Deletes last 3 days from base_events before refresh (skips if table doesn't exist)",
+  description: "Deletes the trailing reconciliation window (RECONCILIATION_LOOKBACK_DAYS in core_config.js) from base_events before refresh (skips if table doesn't exist)",
   tags: ["daily", "ga4", "core"],
   hasOutput: false,
   dependencies: []
+}
+
+js {
+  const helpers = require('includes/helper.js');
+  const config = helpers.getConfig();
+  const lookbackDays = config.RECONCILIATION_LOOKBACK_DAYS;
 }
 
 DECLARE table_exists BOOL DEFAULT FALSE;
@@ -17,6 +23,6 @@ SET table_exists = (
 
 IF table_exists THEN
   DELETE FROM `${dataform.projectConfig.vars.SOURCE_PROJECT}.${dataform.projectConfig.vars.CORE_DATASET}.base_events`
-  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 3 DAY)
+  WHERE event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL ${lookbackDays} DAY)
     AND event_date <= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY);
 END IF;
