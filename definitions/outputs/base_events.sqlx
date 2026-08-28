@@ -603,7 +603,7 @@ processed_events AS (
 
 keys_added AS (
     SELECT
-        *,
+        * EXCEPT(page_location, page_referrer, page_title),
 
         -- Session Key
         CONCAT(
